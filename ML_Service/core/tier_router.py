@@ -110,7 +110,7 @@ _COMPLEXITY_CONNECTIVE = _c(
 # ──────────────────────────────────────────────────────────────────────────────
 
 _CONTEXT_LONG_THRESHOLD = 50   # words in context to trigger S4
-_TIER_BOUNDARIES = (4, 8)      # [Tier1 < 4], [4 ≤ Tier2 < 8], [Tier3 ≥ 8]
+_TIER_BOUNDARIES = (4, 7)      # [Tier1 < 4], [4 <= Tier2 < 7], [Tier3 >= 7]
 
 
 def _score_token_count(prompt: str) -> tuple[int, str]:
