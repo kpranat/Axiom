@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 from core.classifier import classify
 from core.tier_router import route as tier_route
 from core.prompt_optimizer import optimize as optimize_prompt
+from core.confidence_few_shot import build_confidence_block
 from models.schemas import RouteRequest, RouteResponse
 
 router = APIRouter(tags=["Router"])
@@ -68,9 +69,13 @@ async def route_prompt(request: RouteRequest) -> RouteResponse:
         # prompt when the classifier agrees it's needed.
         opt_result = optimize_prompt(request.prompt, active_context, route_result.tier)
 
-        # ── 4. Return ─────────────────────────────────────────────────────────
+        # ── 4. Append few-shot confidence block ──────────────────────────────
+        confidence_block = build_confidence_block(route_result.tier)
+        final_prompt = f"{opt_result.optimized_prompt}\n\n{confidence_block}"
+
+        # ── 5. Return ─────────────────────────────────────────────────────────
         return RouteResponse(
-            prompt_to_send=opt_result.optimized_prompt,
+            prompt_to_send=final_prompt,
             tier=route_result.tier,
             reason=route_result.reason,
             original_tokens=opt_result.original_tokens,
