@@ -141,3 +141,29 @@ class LLMInvokeResponse(BaseModel):
         ...,
         description="Placeholder LLM response (real API call goes here in production).",
     )
+
+
+class LLMSimulateRequest(BaseModel):
+    """Request body for /llm/simulate endpoint."""
+
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        description="Raw user prompt to route and dispatch to a simulated model.",
+    )
+    context: str | None = Field(
+        default=None,
+        description="Optional summarized conversation context used only for tier scoring.",
+    )
+
+
+class LLMSimulateResponse(BaseModel):
+    """Response body returned by /llm/simulate endpoint."""
+
+    tier_number: int = Field(..., description="Resolved numeric tier (1, 2, or 3).")
+    tier_name: str = Field(..., description="Resolved named tier: LOW | MID | HIGH.")
+    tier_reason: str = Field(..., description="Primary router reason for the tier decision.")
+    model_used: str = Field(..., description="Model selected in the simulated cascade.")
+    models_tried: list[str] = Field(..., description="Models attempted in order.")
+    prompt_sent: str = Field(..., description="Exact prompt sent to the dispatcher.")
+    simulated_response: str = Field(..., description="Simulated model response text.")
