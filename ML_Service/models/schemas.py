@@ -26,48 +26,30 @@ class SummariseResponse(BaseModel):
     tokens_saved: int = Field(..., description="Estimated number of tokens saved by summarising.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Semantic cache schemas
-# ──────────────────────────────────────────────────────────────────────────────
-
-class QueryRequest(BaseModel):
-    """Request body for POST /cache/query."""
+class ClassifyRequest(BaseModel):
+    """Request body for the /classify endpoint."""
 
     prompt: str = Field(
         ...,
-        description="The natural-language query to process through the semantic cache.",
-        min_length=1,
-    )
-    user_id: str = Field(
-        ...,
-        description="Unique identifier for the requesting user (used for the personal cache layer).",
+        description="The latest user message to classify.",
         min_length=1,
     )
 
 
-class QueryResponse(BaseModel):
-    """Response body returned by POST /cache/query."""
+class ClassifyResponse(BaseModel):
+    """Response body returned by the /classify endpoint."""
 
-    response: str = Field(..., description="The answer — from cache or LLM.")
-    cache_layer: str = Field(
+    needs_context: bool = Field(
         ...,
-        description="Which layer served the response: 'global', 'personal', or 'miss' (LLM called).",
+        description="True if the prompt requires prior conversation history to answer correctly.",
     )
-    classified: str = Field(
+    confidence: float = Field(
         ...,
-        description="Classification of the prompt: 'PERSONAL' or 'GENERIC'.",
+        ge=0.0,
+        le=1.0,
+        description="Classifier confidence in the decision (0.0 – 1.0).",
     )
-    score: Optional[float] = Field(
-        None,
-        description="Cosine similarity score of the cache hit (None on LLM call).",
-    )
-
-
-class CacheStatsResponse(BaseModel):
-    """Response body returned by GET /cache/stats."""
-
-    global_entries: int = Field(..., description="Number of entries in the global FAISS store.")
-    user_stores: dict[str, int] = Field(
+    reason: str = Field(
         ...,
-        description="Mapping of user_id -> number of entries in their personal FAISS store.",
+        description="Short explanation of the strongest signal that drove the decision.",
     )
