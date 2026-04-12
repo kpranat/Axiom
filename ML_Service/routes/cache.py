@@ -7,8 +7,14 @@ routes/cache.py
 """
 
 from fastapi import APIRouter
-from models.schemas import QueryRequest, QueryResponse, CacheStatsResponse
-from core.cascader import process_query
+from models.schemas import (
+    QueryRequest,
+    QueryResponse,
+    CacheStoreRequest,
+    CacheStoreResponse,
+    CacheStatsResponse,
+)
+from core.cascader import lookup_query, store_response
 from core.FAISS_store import cache_manager
 
 router = APIRouter(prefix="/cache", tags=["Semantic Cache"])
@@ -27,18 +33,32 @@ async def query(request: QueryRequest) -> QueryResponse:
     """
     Process a prompt through the two-layer semantic cache.
 
-    Flow:
+    Cache lookup only:
     1. Classify prompt (PERSONAL / GENERIC)
     2. Embed prompt (all-MiniLM-L6-v2, 384-dim)
-    3. Check GLOBAL FAISS store
-    4. If miss -> check PERSONAL FAISS store
-    5. If miss -> invoke mock LLM
-    6. Store result in the appropriate layer
-
-    All steps are logged to the terminal in real-time.
+    3. Check GLOBAL then PERSONAL FAISS stores
+    4. Return hit metadata or miss metadata
     """
-    result = process_query(request.prompt, request.user_id)
+    result = lookup_query(request.prompt, request.user_id)
     return QueryResponse(**result)
+
+
+@router.post(
+    "/store",
+    response_model=CacheStoreResponse,
+    summary="Store final response in semantic cache",
+)
+async def store(request: CacheStoreRequest) -> CacheStoreResponse:
+    """
+    Store a final model response after route/invoke on cache miss.
+    """
+    result = store_response(
+        prompt=request.prompt,
+        user_id=request.user_id,
+        response=request.response,
+        classified=request.classified,
+    )
+    return CacheStoreResponse(**result)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -1,17 +1,16 @@
 """
 core/cascader.py
 ----------------
-Two-layer semantic cache cascade logic.
+Two-layer semantic cache primitives.
 
-Flow (for every query):
-  1.  Classify  -> PERSONAL | GENERIC
-  2.  Embed     (single embedding, reused throughout)
-  3.  Check GLOBAL cache
-  4.  If MISS -> check PERSONAL cache
-  5.  If MISS -> call LLM mock
-  6.  Store: GLOBAL if generic, PERSONAL if personal
+Primary orchestrated flow (used by Go backend):
+    1. lookup_query() -> classify + embed + global/personal cache search.
+    2. On hit: return cached response.
+    3. On miss: backend continues route/invoke flow.
+    4. store_response() stores final model output in global or personal cache.
 
-All observable decisions are printed via log().
+Legacy process_query() remains available for demos where cache miss still
+falls back to a local mock LLM call.
 """
 
 from __future__ import annotations
@@ -64,6 +63,106 @@ def call_llm(prompt: str) -> str:
     return response
 
 
+def _classify_prompt(prompt: str) -> tuple[bool, str]:
+    personal = is_personal(prompt)
+    classification = "PERSONAL" if personal else "GENERIC"
+    return personal, classification
+
+
+def lookup_query(prompt: str, user_id: str) -> dict:
+    """
+    Cache-only lookup path used by service orchestration.
+
+    Returns:
+      {
+        "cache_hit": bool,
+        "response": str | None,
+        "cache_layer": "global" | "personal" | "miss",
+        "classified": "PERSONAL" | "GENERIC",
+        "score": float | None,
+      }
+    """
+
+    log("REQUEST     ", f"\"{prompt}\"  [user={user_id}]")
+
+    personal, classification = _classify_prompt(prompt)
+    log("CLASSIFY    ", classification)
+
+    log("EMBED       ", "Generating embedding ...")
+    embedding: np.ndarray = embed(prompt)
+
+    log("CACHE_CHECK ", "GLOBAL")
+    global_hit = cache_manager.search_global(embedding)
+    if global_hit:
+        log("CACHE_HIT   ", f"GLOBAL ✅  (score={global_hit['score']})")
+        return {
+            "cache_hit": True,
+            "response": global_hit["response"],
+            "cache_layer": "global",
+            "classified": classification,
+            "score": global_hit["score"],
+        }
+
+    log("CACHE_MISS  ", "GLOBAL ❌")
+
+    log("CACHE_CHECK ", "PERSONAL")
+    personal_hit = cache_manager.search_personal(user_id, embedding)
+    if personal_hit:
+        log("CACHE_HIT   ", f"PERSONAL ✅  (score={personal_hit['score']})")
+        return {
+            "cache_hit": True,
+            "response": personal_hit["response"],
+            "cache_layer": "personal",
+            "classified": classification,
+            "score": personal_hit["score"],
+        }
+
+    log("CACHE_MISS  ", "PERSONAL ❌")
+    return {
+        "cache_hit": False,
+        "response": None,
+        "cache_layer": "miss",
+        "classified": classification,
+        "score": None,
+    }
+
+
+def store_response(
+    prompt: str,
+    user_id: str,
+    response: str,
+    classified: str | None = None,
+) -> dict:
+    """
+    Store a final model response in the appropriate cache layer.
+    """
+    if classified in {"PERSONAL", "GENERIC"}:
+        classification = classified
+        personal = classified == "PERSONAL"
+    else:
+        personal, classification = _classify_prompt(prompt)
+
+    log("CLASSIFY    ", f"{classification} (store)")
+    log("EMBED       ", "Generating embedding for store ...")
+    embedding: np.ndarray = embed(prompt)
+
+    if personal:
+        cache_manager.store_personal(user_id, embedding, prompt, response)
+        log("STORE       ", f"PERSONAL  [user={user_id}]")
+        stored_layer = "personal"
+    else:
+        cache_manager.store_global(embedding, prompt, response)
+        log("STORE       ", "GLOBAL")
+        stored_layer = "global"
+
+    print()
+    return {
+        "status": "ok",
+        "message": "Response stored in semantic cache.",
+        "stored_layer": stored_layer,
+    }
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Main cascade
 # ──────────────────────────────────────────────────────────────────────────────
@@ -79,64 +178,17 @@ def process_query(prompt: str, user_id: str) -> dict:
       }
     """
 
-    # ── 1. LOG REQUEST ────────────────────────────────────────────────────────
-    log("REQUEST     ", f"\"{prompt}\"  [user={user_id}]")
+    lookup = lookup_query(prompt, user_id)
+    if lookup["cache_hit"]:
+        return lookup
 
-    # ── 2. CLASSIFY ───────────────────────────────────────────────────────────
-    personal = is_personal(prompt)
-    classification = "PERSONAL" if personal else "GENERIC"
-    log("CLASSIFY    ", classification)
-
-    # ── 3. EMBED (once) ───────────────────────────────────────────────────────
-    log("EMBED       ", "Generating embedding ...")
-    embedding: np.ndarray = embed(prompt)
-
-    # ── 4. GLOBAL CACHE CHECK ─────────────────────────────────────────────────
-    log("CACHE_CHECK ", "GLOBAL")
-    global_hit = cache_manager.search_global(embedding)
-
-    if global_hit:
-        log("CACHE_HIT   ", f"GLOBAL ✅  (score={global_hit['score']})")
-        return {
-            "response": global_hit["response"],
-            "cache_layer": "global",
-            "classified": classification,
-            "score": global_hit["score"],
-        }
-
-    log("CACHE_MISS  ", "GLOBAL ❌")
-
-    # ── 5. PERSONAL CACHE CHECK ───────────────────────────────────────────────
-    log("CACHE_CHECK ", "PERSONAL")
-    personal_hit = cache_manager.search_personal(user_id, embedding)
-
-    if personal_hit:
-        log("CACHE_HIT   ", f"PERSONAL ✅  (score={personal_hit['score']})")
-        return {
-            "response": personal_hit["response"],
-            "cache_layer": "personal",
-            "classified": classification,
-            "score": personal_hit["score"],
-        }
-
-    log("CACHE_MISS  ", "PERSONAL ❌")
-
-    # ── 6. LLM CALL ───────────────────────────────────────────────────────────
     response = call_llm(prompt)
-
-    # ── 7. STORE ──────────────────────────────────────────────────────────────
-    if personal:
-        cache_manager.store_personal(user_id, embedding, prompt, response)
-        log("STORE       ", f"PERSONAL  [user={user_id}]")
-    else:
-        cache_manager.store_global(embedding, prompt, response)
-        log("STORE       ", "GLOBAL")
-
-    print()  # blank separator between requests in the terminal
+    store_response(prompt, user_id, response, lookup.get("classified"))
 
     return {
+        "cache_hit": False,
         "response": response,
         "cache_layer": "miss",
-        "classified": classification,
+        "classified": lookup["classified"],
         "score": None,
     }
