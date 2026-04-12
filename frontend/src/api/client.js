@@ -1,22 +1,46 @@
 /**
  * client.js — Centralized fetch layer for Axiom frontend.
  * All API calls to the Go backend route through here.
- * Base URL is controlled via VITE_API_URL environment variable.
+ * Default base path is /api so Vite can proxy requests to Go in dev.
  */
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+const BASE_URL = import.meta.env.VITE_API_URL || '/api'
+
+function buildURL(path) {
+  const normalizedBase = BASE_URL.endsWith('/') ? BASE_URL.slice(0, -1) : BASE_URL
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${normalizedBase}${normalizedPath}`
+}
+
+async function parseError(res) {
+  const text = await res.text()
+  if (!text) return `HTTP ${res.status}`
+
+  try {
+    const payload = JSON.parse(text)
+    if (payload && typeof payload.error === 'string' && payload.error.trim()) {
+      return payload.error
+    }
+  } catch {
+    // Response body is plain text.
+  }
+
+  return text
+}
 
 async function request(method, path, body = null) {
   const opts = {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: {},
   }
-  if (body) opts.body = JSON.stringify(body)
+  if (body !== null) {
+    opts.headers['Content-Type'] = 'application/json'
+    opts.body = JSON.stringify(body)
+  }
 
-  const res = await fetch(`${BASE_URL}${path}`, opts)
+  const res = await fetch(buildURL(path), opts)
   if (!res.ok) {
-    const err = await res.text()
-    throw new Error(err || `HTTP ${res.status}`)
+    throw new Error(await parseError(res))
   }
   return res.json()
 }
