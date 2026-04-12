@@ -61,7 +61,7 @@ def _c(pattern: str) -> re.Pattern:
 # S2 — reasoning / analytical keywords
 _REASONING = _c(
     r"\b("
-    r"explain\s+why|explain\s+how|why\s+does|how\s+does|"
+    r"explain\s+why|explain\s+how|detail|why\s+does|how\s+does|"
     r"compare|contrast|versus|vs\.?|"
     r"analy[sz]e|analy[sz]is|evaluate|evaluation|"
     r"critique|critically|assess|assessment|"
@@ -132,7 +132,7 @@ _SIZE_OR_DURATION = _c(
 
 _ANALYSIS_ACTION = _c(
     r"\b("
-    r"analy[sz]e|summari[sz]e|review|extract|identify|synthesi[sz]e|audit"
+    r"analy[sz]e|summari[sz]e|review|extract|identify|synthesi[sz]e|audit|detail"
     r")\b"
 )
 
@@ -166,7 +166,7 @@ def _score_token_count(prompt: str) -> tuple[int, str]:
     26+ tokens    → 1 pt
     """
     n = len(prompt.split())
-    if n <= 25:
+    if n <= 20:
         return 0, f"Short prompt ({n} tokens)"
     return 1, f"Length signal present ({n} tokens, low weight)"
 
@@ -294,5 +294,26 @@ def route(prompt: str, context: Optional[str] = None) -> RouteResult:
         tier = 2
     else:
         tier = 3
+
+    # ------------- DEBUG PRINT -------------
+    print("\n" + "=" * 60)
+    print("[ROUTER_SIM] Full Scoring Matrix for Prompt Tiering")
+    print("-" * 60)
+    signal_names = [
+        "Token Count",
+        "Reasoning / Complexity",
+        "Technical / Domain Vocab",
+        "Context / History",
+        "Instruction Framing",
+        "Large-source Analysis",
+        "Structured Deliverable"
+    ]
+    for i, ((pts, reason), name) in enumerate(zip(signals, signal_names), 1):
+        reason_str = reason if reason else "No match"
+        print(f"  S{i} [{name}]: {pts} pts  -> {reason_str}")
+    print("-" * 60)
+    print(f"  Total Score: {total_score} -> Assigned Tier: {tier}")
+    print("=" * 60 + "\n")
+    # ---------------------------------------
 
     return RouteResult(tier=tier, score=total_score, reason=best_reason)

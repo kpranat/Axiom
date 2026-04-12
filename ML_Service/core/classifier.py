@@ -220,4 +220,12 @@ def classify(prompt: str) -> tuple[bool, float, str]:
         # More signals still detected (but below threshold) → lower confidence in False verdict
         confidence = max(0.99 - score * 0.08, 0.60)
 
+    # ------------- DEBUG PRINT -------------
+    print("\n" + "~" * 60)
+    print(f"[CLASS_SIM] Checking Context Requirement")
+    print(f"[CLASS_SIM] Score: {score} -> needs_context: {needs_context} (Confidence: {confidence})")
+    print(f"[CLASS_SIM] Reason: {reason}")
+    print("~" * 60 + "\n")
+    # ---------------------------------------
+
     return needs_context, round(confidence, 2), reason
