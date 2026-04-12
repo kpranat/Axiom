@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
@@ -167,3 +167,18 @@ class LLMSimulateResponse(BaseModel):
     models_tried: list[str] = Field(..., description="Models attempted in order.")
     prompt_sent: str = Field(..., description="Exact prompt sent to the dispatcher.")
     simulated_response: str = Field(..., description="Simulated model response text.")
+
+
+class QueryRequest(BaseModel):
+    prompt: str
+    user_id: str
+
+class QueryResponse(BaseModel):
+    response: str
+    source: str  # e.g., "cache_global", "cache_personal", "llm"
+    tokens_saved: int
+
+class CacheStatsResponse(BaseModel):
+    total_entries: int
+    global_count: int
+    personal_count: int
