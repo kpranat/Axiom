@@ -12,13 +12,15 @@ the prompt to one of three model tiers:
 
 Algorithm
 ---------
-Five weighted signals are evaluated:
+Seven weighted signals are evaluated:
 
-  S1  Token count of prompt            (0–3 pts, scaled by length)
-  S2  Reasoning keywords               (+2 pts)
+    S1  Token count of prompt            (0–1 pt, deliberately de-emphasized)
+    S2  Reasoning / complexity keywords  (+3 pts)
   S3  Technical / domain vocabulary    (+1 pt)
   S4  Context attached and long        (+2 pts)
   S5  Complex instruction framing      (+1 pt)
+    S6  Large-source analysis cues       (+2 pts)
+    S7  Structured deliverable cues      (0–3 pts)
 
 Score → Tier
   0–3  →  Tier 1
@@ -65,6 +67,11 @@ _REASONING = _c(
     r"critique|critically|assess|assessment|"
     r"justify|justify\s+your|reasoning|reason\s+through|"
     r"pros\s+and\s+cons|trade[\s-]?offs?|"
+    r"debug|debugging|diagnos(?:e|is|ing)|troubleshoot(?:ing)?|"
+    r"investigate|root\s+cause|resolve|fix|repair|"
+    r"synthesi[sz]e|summari[sz]e|extract|"
+    r"recommend(?:ation|ations)?|propose|proposal|"
+    r"prioriti[sz]e|prioritization|roadmap|strategy|plan|planning|"
     r"what\s+are\s+the\s+(implications|consequences|effects|impacts)|"
     r"step[\s-]by[\s-]step|walk\s+me\s+through|break\s+it\s+down"
     r")\b"
@@ -80,7 +87,10 @@ _TECHNICAL = _c(
     r"framework|infrastructure|pipeline|"
     r"latency|throughput|scalab(?:le|ility)|"
     r"complexit(?:y|ies)|big[\s-]o|"
-    r"database|schema|query|endpoint|"
+    r"database|schema|query|endpoint|api|json|http|"
+    r"error|errors|exception|exceptions|bug|bugs|"
+    r"test|tests|testing|edge\s+cases?|"
+    r"compliance|policy|risk|security|privacy|"
     r"machine\s+learning|neural\s+network|model|embedding|"
     r"refactor|deploy(?:ment|ing)?|containeris|docker|kubernetes"
     r")\b"
@@ -105,39 +115,67 @@ _COMPLEXITY_CONNECTIVE = _c(
 )
 
 
+# S6 — large-source / transcript analysis cues
+_SOURCE_ARTIFACT = _c(
+    r"\b("
+    r"transcript|interview|meeting\s+transcript|call\s+transcript|"
+    r"conversation\s+log|chat\s+log|document|report|paper|file|recording"
+    r")\b"
+)
+
+_SIZE_OR_DURATION = _c(
+    r"\b("
+    r"long|large|full|entire|complete|multi[\s-]?hour|multi[\s-]?page|"
+    r"\d+\s*[-]?\s*(hour|hours|hr|hrs|minute|minutes|min|mins|page|pages)"
+    r")\b"
+)
+
+_ANALYSIS_ACTION = _c(
+    r"\b("
+    r"analy[sz]e|summari[sz]e|review|extract|identify|synthesi[sz]e|audit"
+    r")\b"
+)
+
+
+# S7 — structured deliverable / executive-summary cues
+_EXECUTIVE_OUTPUT = _c(r"\b(executive\s+summary|summary|briefing|report)\b")
+_EVIDENCE_OUTPUT = _c(
+    r"\b(quoted?\s+examples?|with\s+examples?|for\s+every\s+claim|cite|citations?|evidence)\b"
+)
+_WORD_BUDGET = _c(r"\b(\d{2,4}\s*[-]?\s*word[s]?|word\s+limit)\b")
+_MULTI_SECTION_ANALYSIS = _c(
+    r"\b(key\s+themes?|contradictions?|action\s+items?|emotional\s+shifts?|per\s+participant)\b"
+)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Scoring helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
 _CONTEXT_LONG_THRESHOLD = 50   # words in context to trigger S4
-_TIER_BOUNDARIES = (4, 7)      # [Tier1 < 4], [4 <= Tier2 < 7], [Tier3 >= 7]
+_TIER_BOUNDARIES = (4, 8)      # [Tier1 < 4], [4 <= Tier2 < 8], [Tier3 >= 8]
 
 
 def _score_token_count(prompt: str) -> tuple[int, str]:
     """
-    S1: Score based on the token count (whitespace-split) of the prompt.
+    S1: Lightweight length signal (whitespace-split token count).
 
-    ≤ 15 tokens  → 0 pts  (trivially short)
-    16–40 tokens → 1 pt
-    41–80 tokens → 2 pts
-    > 80 tokens  → 3 pts
+    Length is intentionally de-emphasized so complexity/content cues dominate.
+
+    ≤ 25 tokens   → 0 pts
+    26+ tokens    → 1 pt
     """
     n = len(prompt.split())
-    if n <= 15:
+    if n <= 25:
         return 0, f"Short prompt ({n} tokens)"
-    elif n <= 40:
-        return 1, f"Medium-length prompt ({n} tokens)"
-    elif n <= 80:
-        return 2, f"Long prompt ({n} tokens)"
-    else:
-        return 3, f"Very long prompt ({n} tokens)"
+    return 1, f"Length signal present ({n} tokens, low weight)"
 
 
 def _score_reasoning(prompt: str) -> tuple[int, str]:
-    """S2: +2 if any reasoning/analytical keyword is detected."""
+    """S2: +3 if any reasoning/analytical keyword is detected."""
     if _REASONING.search(prompt):
         match = _REASONING.search(prompt)
-        return 2, f"Reasoning keyword detected: '{match.group().strip()}'"
+        return 3, f"Reasoning keyword detected: '{match.group().strip()}'"
     return 0, ""
 
 
@@ -166,6 +204,50 @@ def _score_instruction_framing(prompt: str) -> tuple[int, str]:
     return 0, ""
 
 
+def _score_large_source(prompt: str) -> tuple[int, str]:
+    """S6: +2 for transcript/large-file style analysis prompts."""
+    stripped = prompt.strip()
+
+    source = _SOURCE_ARTIFACT.search(stripped)
+    if not source:
+        return 0, ""
+
+    size_or_duration = _SIZE_OR_DURATION.search(stripped)
+    action = _ANALYSIS_ACTION.search(stripped)
+
+    if size_or_duration or action:
+        second = size_or_duration or action
+        return 2, (
+            "Large-source analysis cue detected: "
+            f"'{source.group().strip()}' + '{second.group().strip()}'"
+        )
+
+    return 1, f"Source artifact detected: '{source.group().strip()}'"
+
+
+def _score_structured_deliverable(prompt: str) -> tuple[int, str]:
+    """S7: 0–3 based on how many structured-output cues are requested."""
+    stripped = prompt.strip()
+
+    cues: list[str] = []
+    if _EXECUTIVE_OUTPUT.search(stripped):
+        cues.append("summary/report output")
+    if _EVIDENCE_OUTPUT.search(stripped):
+        cues.append("evidence/examples requirement")
+    if _WORD_BUDGET.search(stripped):
+        cues.append("word budget")
+    if _MULTI_SECTION_ANALYSIS.search(stripped):
+        cues.append("multi-section analysis")
+
+    if len(cues) >= 3:
+        return 3, f"Structured deliverable cues detected: {', '.join(cues[:3])}"
+    if len(cues) == 2:
+        return 2, f"Structured deliverable cues detected: {', '.join(cues[:2])}"
+    if len(cues) == 1:
+        return 1, f"Structured deliverable cue detected: {cues[0]}"
+    return 0, ""
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Public API
 # ──────────────────────────────────────────────────────────────────────────────
@@ -185,13 +267,15 @@ def route(prompt: str, context: Optional[str] = None) -> RouteResult:
     if not prompt or not prompt.strip():
         return RouteResult(tier=1, score=0, reason="Empty prompt — defaulting to Tier 1")
 
-    # Accumulate scores from all five signals
+    # Accumulate scores from all signals
     signals: list[tuple[int, str]] = [
         _score_token_count(prompt),
         _score_reasoning(prompt),
         _score_technical(prompt),
         _score_context(context),
         _score_instruction_framing(prompt),
+        _score_large_source(prompt),
+        _score_structured_deliverable(prompt),
     ]
 
     total_score = sum(pts for pts, _ in signals)
