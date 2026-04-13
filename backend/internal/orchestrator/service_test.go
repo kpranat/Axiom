@@ -52,7 +52,7 @@ func TestChatTriggersSummaryAtFiveMessages(t *testing.T) {
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
-	current := store.Create()
+	current := store.Create("")
 	current.Messages = []models.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: "a1"},
@@ -99,7 +99,7 @@ func TestChatDoesNotTriggerSummaryBeforeFiveUserMessages(t *testing.T) {
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
-	current := store.Create()
+	current := store.Create("")
 	current.Messages = []models.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: "a1"},
@@ -126,7 +126,7 @@ func TestChatUsesExistingSummaryAsContext(t *testing.T) {
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
-	current := store.Create()
+	current := store.Create("")
 	current.Summary = "existing summary"
 	if err := store.Update(current); err != nil {
 		t.Fatalf("seed session: %v", err)
@@ -146,13 +146,16 @@ func TestCreateSessionDoesNotDependOnMLHealth(t *testing.T) {
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
-	session, err := service.CreateSession(context.Background())
+	session, err := service.CreateSession(context.Background(), "user-1")
 	if err != nil {
 		t.Fatalf("create session failed: %v", err)
 	}
 
 	if session.ID == "" {
 		t.Fatalf("expected session id to be populated")
+	}
+	if session.UserID != "user-1" {
+		t.Fatalf("expected user id to be populated")
 	}
 }
 
@@ -161,7 +164,7 @@ func TestConcurrentChatPreservesAllMessages(t *testing.T) {
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 100})
 
-	current := store.Create()
+	current := store.Create("")
 
 	var wg sync.WaitGroup
 	prompts := []string{"first", "second"}
@@ -187,5 +190,37 @@ func TestConcurrentChatPreservesAllMessages(t *testing.T) {
 
 	if updated.Metrics.CacheMisses != 0 {
 		t.Fatalf("expected cache misses to remain 0 when cache is unused, got %d", updated.Metrics.CacheMisses)
+	}
+}
+
+func TestListUserSessions(t *testing.T) {
+	store := session.NewStore()
+	client := &stubMLClient{}
+	service := NewService(store, client, config.Config{SummaryInterval: 5})
+
+	first := store.Create("user-1")
+	first.Messages = []models.Message{{ID: "m1", Role: "user", Content: "hello"}}
+	first.Summary = "first summary"
+	if err := store.Update(first); err != nil {
+		t.Fatalf("update first session: %v", err)
+	}
+
+	second := store.Create("user-1")
+	if err := store.Update(second); err != nil {
+		t.Fatalf("update second session: %v", err)
+	}
+
+	third := store.Create("user-2")
+	if err := store.Update(third); err != nil {
+		t.Fatalf("update third session: %v", err)
+	}
+
+	sessions, err := service.ListUserSessions("user-1")
+	if err != nil {
+		t.Fatalf("list sessions failed: %v", err)
+	}
+
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(sessions))
 	}
 }
