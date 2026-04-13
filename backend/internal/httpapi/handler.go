@@ -12,9 +12,11 @@ import (
 )
 
 type Service interface {
-	CreateSession(ctx context.Context) (*models.Session, error)
+	CreateSession(ctx context.Context, userID string) (*models.Session, error)
 	Chat(ctx context.Context, sessionID, prompt string) (orchestrator.ChatResponse, error)
 	GetMetrics(sessionID string) (models.SessionMetrics, error)
+	GetSession(sessionID string) (*models.Session, error)
+	ListUserSessions(userID string) ([]orchestrator.SessionSummary, error)
 }
 
 type Handler struct {
@@ -23,6 +25,10 @@ type Handler struct {
 
 type createSessionResponse struct {
 	SessionID string `json:"session_id"`
+}
+
+type createSessionRequest struct {
+	UserID string `json:"user_id"`
 }
 
 type chatRequest struct {
@@ -38,8 +44,10 @@ func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", h.handleHealth)
 	mux.HandleFunc("/session", h.handleSession)
+	mux.HandleFunc("/sessions/", h.handleSessionByID)
 	mux.HandleFunc("/chat", h.handleChat)
 	mux.HandleFunc("/metrics/", h.handleMetrics)
+	mux.HandleFunc("/users/", h.handleUsers)
 	return withCORS(mux)
 }
 
@@ -66,13 +74,50 @@ func (h *Handler) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.service.CreateSession(r.Context())
+	var payload createSessionRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("invalid json body"))
+			return
+		}
+	}
+
+	session, err := h.service.CreateSession(r.Context(), payload.UserID)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, createSessionResponse{SessionID: session.ID})
+}
+
+func (h *Handler) handleSessionByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+
+	sessionID := strings.TrimPrefix(r.URL.Path, "/sessions/")
+	if sessionID == "" || strings.Contains(sessionID, "/") {
+		writeError(w, http.StatusBadRequest, errors.New("session_id is required"))
+		return
+	}
+
+	current, err := h.service.GetSession(sessionID)
+	if err != nil {
+		if orchestrator.IsSessionNotFound(err) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, current)
 }
 
 func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +179,32 @@ func (h *Handler) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, metrics)
+}
+
+func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/users/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "sessions" {
+		writeError(w, http.StatusNotFound, errors.New("route not found"))
+		return
+	}
+
+	sessions, err := h.service.ListUserSessions(parts[0])
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, sessions)
 }
 
 func methodNotAllowed(w http.ResponseWriter) {

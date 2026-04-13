@@ -14,9 +14,10 @@ import (
 )
 
 type SessionStore interface {
-	Create() *models.Session
+	Create(userID string) *models.Session
 	Get(sessionID string) (*models.Session, error)
 	Update(session *models.Session) error
+	ListByUser(userID string) ([]*models.Session, error)
 }
 
 type MLClient interface {
@@ -41,6 +42,18 @@ type ChatResponse struct {
 	CacheHit    bool   `json:"cache_hit"`
 }
 
+type SessionSummary struct {
+	ID           string    `json:"id"`
+	UserID       string    `json:"user_id,omitempty"`
+	Summary      string    `json:"summary"`
+	MessageCount int       `json:"message_count"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	LastMessage  string    `json:"last_message,omitempty"`
+	TokensUsed   int       `json:"tokens_used"`
+	TokensSaved  int       `json:"tokens_saved"`
+}
+
 func NewService(store SessionStore, mlClient MLClient, cfg config.Config) *Service {
 	return &Service{
 		store:           store,
@@ -50,8 +63,8 @@ func NewService(store SessionStore, mlClient MLClient, cfg config.Config) *Servi
 	}
 }
 
-func (s *Service) CreateSession(ctx context.Context) (*models.Session, error) {
-	return s.store.Create(), nil
+func (s *Service) CreateSession(ctx context.Context, userID string) (*models.Session, error) {
+	return s.store.Create(strings.TrimSpace(userID)), nil
 }
 
 func (s *Service) GetMetrics(sessionID string) (models.SessionMetrics, error) {
@@ -60,6 +73,39 @@ func (s *Service) GetMetrics(sessionID string) (models.SessionMetrics, error) {
 		return models.SessionMetrics{}, err
 	}
 	return current.Metrics, nil
+}
+
+func (s *Service) GetSession(sessionID string) (*models.Session, error) {
+	return s.store.Get(sessionID)
+}
+
+func (s *Service) ListUserSessions(userID string) ([]SessionSummary, error) {
+	sessions, err := s.store.ListByUser(strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]SessionSummary, 0, len(sessions))
+	for _, current := range sessions {
+		lastMessage := ""
+		if len(current.Messages) > 0 {
+			lastMessage = current.Messages[len(current.Messages)-1].Content
+		}
+
+		result = append(result, SessionSummary{
+			ID:           current.ID,
+			UserID:       current.UserID,
+			Summary:      current.Summary,
+			MessageCount: len(current.Messages),
+			CreatedAt:    current.CreatedAt,
+			UpdatedAt:    current.UpdatedAt,
+			LastMessage:  lastMessage,
+			TokensUsed:   current.Metrics.TokensUsed,
+			TokensSaved:  current.Metrics.TokensSaved,
+		})
+	}
+
+	return result, nil
 }
 
 func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatResponse, error) {
@@ -77,6 +123,7 @@ func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatRespo
 	}
 
 	userMessage := models.Message{
+		ID:        session.NewID(),
 		Role:      "user",
 		Content:   prompt,
 		Timestamp: time.Now().UTC(),
@@ -106,6 +153,7 @@ func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatRespo
 	}
 
 	assistantMessage := models.Message{
+		ID:        session.NewID(),
 		Role:      "assistant",
 		Content:   invokeResponse.SimulatedResponse,
 		Timestamp: time.Now().UTC(),
