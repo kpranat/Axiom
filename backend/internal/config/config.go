@@ -16,7 +16,7 @@ type Config struct {
 func Load() Config {
 	return Config{
 		HTTPAddr:         getEnv("AXIOM_HTTP_ADDR", ":8080"),
-		MLServiceBaseURL: getEnv("AXIOM_ML_SERVICE_URL", "http://localhost:8000"),
+		MLServiceBaseURL: getEnv("AXIOM_ML_SERVICE_URL", "http://127.0.0.1:8000"),
 		SummaryInterval:  getEnvInt("AXIOM_SUMMARY_INTERVAL", 5),
 		RequestTimeout:   time.Duration(getEnvInt("AXIOM_REQUEST_TIMEOUT_SECONDS", 30)) * time.Second,
 	}

@@ -1,12 +1,15 @@
 """
 routes/cache.py
 ---------------
-/cache/query  — main semantic-cache endpoint
-/cache/stats  — inspect cache sizes
-/cache/reset  — clear all caches (useful during demos)
+/cache/query            — main semantic-cache endpoint
+/cache/store            — store a response in the cache
+/cache/stats            — inspect cache sizes
+/cache/reset            — clear all caches (useful during demos)
+/cache/debug-similarity — compare cosine similarity of two prompts
 """
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 from models.schemas import (
     QueryRequest,
     QueryResponse,
@@ -14,7 +17,7 @@ from models.schemas import (
     CacheStoreResponse,
     CacheStatsResponse,
 )
-from core.cascader import lookup_query, store_response
+from core.cascader import lookup_query, store_response, debug_similarity
 from core.FAISS_store import cache_manager
 
 router = APIRouter(prefix="/cache", tags=["Semantic Cache"])
@@ -35,7 +38,7 @@ async def query(request: QueryRequest) -> QueryResponse:
 
     Cache lookup only:
     1. Classify prompt (PERSONAL / GENERIC)
-    2. Embed prompt (all-MiniLM-L6-v2, 384-dim)
+    2. Embed prompt with minilm sentence-transformer
     3. Check GLOBAL then PERSONAL FAISS stores
     4. Return hit metadata or miss metadata
     """
@@ -76,6 +79,8 @@ async def cache_stats() -> CacheStatsResponse:
     return CacheStatsResponse(
         global_entries=stats["global_entries"],
         user_stores=stats["user_stores"],
+        model_global_entries=stats["model_global_entries"],
+        model_user_stores=stats["model_user_stores"],
     )
 
 
@@ -92,7 +97,44 @@ async def reset_cache() -> dict:
     Wipe the global FAISS store and all per-user stores.
     Useful between demo runs to start fresh.
     """
-    cache_manager.global_store.__init__(cache_manager.dim)
-    cache_manager.user_stores.clear()
-    print("[RESET       ] All caches cleared ♻️")
+    cache_manager.reset()
+    print("[RESET       ] Semantic cache cleared")
     return {"status": "ok", "message": "All caches reset."}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# /cache/debug-similarity
+# ──────────────────────────────────────────────────────────────────────────────
+
+class DebugSimilarityRequest(BaseModel):
+    prompt_a: str
+    prompt_b: str
+
+
+class DebugSimilarityResponse(BaseModel):
+    prompt_a: str
+    prompt_b: str
+    similarity: dict[str, float]
+    threshold: float
+    would_hit: dict[str, bool]
+
+
+@router.post(
+    "/debug-similarity",
+    response_model=DebugSimilarityResponse,
+    summary="[DEBUG] Compare cosine similarity of two prompts",
+)
+async def debug_similarity_endpoint(request: DebugSimilarityRequest) -> DebugSimilarityResponse:
+    """
+    Compute the raw cosine similarity between two prompts using
+    the MiniLM-L6-v2 (384d) embedding model.
+
+    Results are printed to the terminal **and** returned in the JSON response.
+    Use this to understand why a cache hit did or did not fire and to calibrate
+    the similarity threshold.
+
+    **Example use-case**: compare `"give recipe to make tea"` vs
+    `"how to make tea"` to see which model scores them closer together.
+    """
+    result = debug_similarity(request.prompt_a, request.prompt_b)
+    return DebugSimilarityResponse(**result)

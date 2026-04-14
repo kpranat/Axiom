@@ -179,6 +179,14 @@ class QueryResponse(BaseModel):
     cache_layer: str = Field(..., description="Hit layer: global, personal, or miss.")
     classified: str = Field(..., description="Prompt classification used by cache: PERSONAL or GENERIC.")
     score: float | None = Field(default=None, description="Similarity score for cache hits.")
+    model_used: str | None = Field(
+        default=None,
+        description="Embedding model that produced the winning cache hit.",
+    )
+    model_scores: dict[str, float | None] | dict[str, dict[str, float | None]] | None = Field(
+        default=None,
+        description="Per-model similarity scores captured during lookup.",
+    )
 
 
 class CacheStoreRequest(BaseModel):
@@ -195,7 +203,19 @@ class CacheStoreResponse(BaseModel):
     status: str = Field(..., description="Operation status.")
     message: str = Field(..., description="Human-readable operation message.")
     stored_layer: str = Field(..., description="Storage layer used: global or personal.")
+    models_stored: list[str] = Field(
+        default_factory=list,
+        description="Embedding-model caches updated by the store operation.",
+    )
 
 class CacheStatsResponse(BaseModel):
     global_entries: int = Field(..., description="Total entries in global cache.")
     user_stores: dict[str, int] = Field(..., description="Per-user cache entry counts.")
+    model_global_entries: dict[str, int] = Field(
+        default_factory=dict,
+        description="Global cache entry counts per embedding model.",
+    )
+    model_user_stores: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        description="Per-user cache entry counts per embedding model.",
+    )
