@@ -5,8 +5,10 @@
  */
 
 import { useRef, useEffect, useState } from 'react'
+import { motion, useAnimationControls } from 'framer-motion'
 import Message from './Message.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
+import Logo from '../assets/Adobe Express - file.png'
 
 const MODEL_OPTIONS = [
   { value: 'auto', label: 'Auto (Cascade)' },
@@ -54,20 +56,6 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
     <main className={`chat-panel ${!hasMessages ? 'empty-state' : ''}`} role="main">
       {/* Top bar */}
       <div className="chat-topbar">
-        {!isSidebarOpen && (
-          <button 
-            className="sidebar-open-btn" 
-            onClick={onToggleSidebar}
-            title="Open sidebar"
-            aria-label="Open sidebar"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </button>
-        )}
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       </div>
 
@@ -96,24 +84,65 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
       <div className="input-area">
         <div className="input-container">
           <div className="input-row">
-            <textarea
-              id="chat-input"
-              ref={textareaRef}
-              className="chat-textarea"
-              placeholder="What can I help you with?"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={1}
-              aria-label="Chat input"
-              disabled={isLoading}
-            />
+            <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'flex-start' }}>
+              {!input && !hasMessages && (
+                <motion.div
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: '2px', // matches textarea's 2px padding
+                    pointerEvents: 'none',
+                    color: 'var(--text-placeholder)',
+                    display: 'flex',
+                    gap: '4px',
+                    fontSize: '14px',
+                    fontFamily: 'var(--font-sans)',
+                    lineHeight: '1.5',
+                    zIndex: 1
+                  }}
+                  initial="hidden"
+                  animate="visible"
+                  variants={{
+                    hidden: { opacity: 0 },
+                    visible: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 1.2 } }
+                  }}
+                  aria-hidden="true"
+                >
+                  {"What can I help you with?".split(' ').map((word, i) => (
+                    <motion.span 
+                      key={i} 
+                      variants={{
+                        hidden: { opacity: 0, y: 6, filter: 'blur(2px)' },
+                        visible: { opacity: 1, y: 0, filter: 'blur(0px)', transition: { duration: 0.4, ease: 'easeOut' } }
+                      }}
+                      style={{ display: 'inline-block' }}
+                    >
+                      {word}
+                    </motion.span>
+                  ))}
+                </motion.div>
+              )}
+              <textarea
+                id="chat-input"
+                ref={textareaRef}
+                className="chat-textarea"
+                placeholder={hasMessages ? "Reply..." : ""}
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={1}
+                aria-label="Chat input"
+                disabled={isLoading}
+                style={{ zIndex: 2, position: 'relative', width: '100%' }}
+              />
+            </div>
             <button
               id="btn-send"
               className="send-btn"
               onClick={submit}
               disabled={!input.trim() || isLoading}
               aria-label="Send message"
+              style={{ zIndex: 2 }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <line x1="22" y1="2" x2="11" y2="13" />
@@ -143,15 +172,153 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
   )
 }
 
+const TIME_MESSAGES = {
+  morning: [
+    "Fresh start today",
+    "Let's begin",
+    "Morning clarity",
+    "Good to see you",
+    "What's on your mind",
+  ],
+  afternoon: [
+    "Keep it moving",
+    "In the flow",
+    "Still going strong",
+    "What's next",
+    "Ready when you are",
+  ],
+  evening: [
+    "Take it easy",
+    "Calm evening",
+    "Winding down",
+    "How's it going",
+    "What can I help with",
+  ],
+  night: [
+    "Hello, night owl",
+    "Still awake",
+    "Quiet hours",
+    "Late night thoughts",
+    "Burning the midnight oil",
+  ],
+}
+
+function getTimePeriod() {
+  const hour = new Date().getHours()
+  if (hour >= 5 && hour < 12) return 'morning'
+  if (hour >= 12 && hour < 17) return 'afternoon'
+  if (hour >= 17 && hour < 21) return 'evening'
+  return 'night'
+}
+
+function pickMessage(period) {
+  const pool = TIME_MESSAGES[period]
+  return pool[Math.floor(Math.random() * pool.length)]
+}
+
 function Welcome() {
+  const [greeting] = useState(() => pickMessage(getTimePeriod()))
+  const spinControls = useAnimationControls()
+  const isSpinning = useRef(false)
+
+  async function handleClick() {
+    if (isSpinning.current) return
+    isSpinning.current = true
+    
+    await spinControls.start({
+      scale: 0.95,
+      rotate: 360,
+      transition: { duration: 1.4, ease: 'easeInOut' }
+    })
+    
+    spinControls.set({ rotate: 0 })
+    
+    // Scale back up cleanly
+    await spinControls.start({
+      scale: 1,
+      transition: { duration: 0.4, ease: 'easeOut' }
+    })
+    
+    isSpinning.current = false
+  }
+
+  // Split greeting into words for word-by-word animation
+  const words = greeting.split(' ')
+
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.12,
+        delayChildren: 0.3
+      }
+    }
+  }
+
+  const wordVariants = {
+    hidden: { opacity: 0, y: 10, filter: 'blur(4px)' },
+    visible: { 
+      opacity: 1, 
+      y: 0, 
+      filter: 'blur(0px)',
+      transition: { duration: 0.5, ease: 'easeOut' } 
+    }
+  }
+
   return (
     <div className="chat-welcome" role="presentation">
-      <div className="chat-welcome-icon" aria-hidden="true">✦</div>
-      <h2>What can i do for you?</h2>
-      <p>
+      {/* Float wrapper */}
+      <motion.div
+        animate={{ y: [0, -3, 0] }}
+        transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ display: 'flex' }}
+      >
+        <motion.img
+          src={Logo}
+          alt="Axiom Logo"
+          animate={spinControls}
+          onHoverStart={() => {
+            if (isSpinning.current) return
+            spinControls.start({
+              scale: 1.05,
+              rotate: [0, -4, 4, -2, 2, 0],
+              transition: { duration: 1.2, ease: 'easeInOut' }
+            })
+          }}
+          onHoverEnd={() => {
+            if (isSpinning.current) return
+            spinControls.start({
+              scale: 1,
+              rotate: 0,
+              transition: { duration: 0.6, ease: 'easeOut' }
+            })
+          }}
+          onClick={handleClick}
+          style={{ width: '160px', height: 'auto', cursor: 'pointer', filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.15))' }}
+        />
+      </motion.div>
+      <motion.h2
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px' }}
+      >
+        {words.map((word, i) => (
+          <motion.span key={i} variants={wordVariants} style={{ display: 'inline-block' }}>
+            {word}
+          </motion.span>
+        ))}
+      </motion.h2>
+      <motion.p
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.8 }}
+      >
         Ask anything. Axiom routes your query through a semantic cache and
         model cascade to minimize token cost automatically.
-      </p>
+      </motion.p>
     </div>
   )
 }
+

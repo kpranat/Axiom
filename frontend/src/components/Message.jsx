@@ -3,6 +3,8 @@
  * Per PRD: each message shows badge for cache, small model, or large model.
  */
 
+import { motion } from 'framer-motion'
+
 export default function Message({ message }) {
   const isUser = message.role === 'user'
 
@@ -11,9 +13,47 @@ export default function Message({ message }) {
     ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null
 
+  const renderAiContent = () => {
+    const words = message.content.split(' ')
+
+    return (
+      <motion.div
+        variants={{
+          hidden: { opacity: 1 },
+          visible: {
+            opacity: 1,
+            transition: { staggerChildren: 0.08 }
+          }
+        }}
+        initial="hidden"
+        animate="visible"
+        style={{ display: 'inline-block' }}
+      >
+        {words.map((word, i) => (
+          <motion.span
+            key={i}
+            variants={{
+              hidden: { opacity: 0, y: 4 },
+              visible: { 
+                opacity: 1, 
+                y: 0, 
+                transition: { duration: 0.3, ease: 'easeOut' }
+              }
+            }}
+            style={{ display: 'inline-block', whiteSpace: 'pre-wrap' }}
+          >
+            {word + (i < words.length - 1 ? ' ' : '')}
+          </motion.span>
+        ))}
+      </motion.div>
+    )
+  }
+
   return (
     <div className={`message-wrapper ${isUser ? 'user' : 'ai'}`}>
-      <div className="message-bubble">{message.content}</div>
+      <div className="message-bubble">
+        {isUser ? message.content : renderAiContent()}
+      </div>
 
       {!isUser && (
         <div className="message-meta">

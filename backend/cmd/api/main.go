@@ -20,7 +20,18 @@ func main() {
 	}
 
 	mlClient := ml.NewClient(cfg.MLServiceBaseURL, httpClient)
-	store := session.NewStore()
+	var store orchestrator.SessionStore
+	if cfg.SupabaseURL != "" && cfg.SupabaseKey != "" {
+		supabaseStore, err := session.NewSupabaseStore(cfg.SupabaseURL, cfg.SupabaseKey, httpClient)
+		if err != nil {
+			log.Fatalf("supabase store init failed: %v", err)
+		}
+		store = supabaseStore
+		log.Printf("session store: supabase")
+	} else {
+		store = session.NewStore()
+		log.Printf("session store: in-memory fallback")
+	}
 	service := orchestrator.NewService(store, mlClient, cfg)
 	handler := httpapi.NewHandler(service)
 
