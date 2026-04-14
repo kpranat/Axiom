@@ -42,13 +42,16 @@ func NewHandler(service Service) *Handler {
 
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", h.handleHealth)
-	mux.HandleFunc("/session", h.handleSession)
-	mux.HandleFunc("/sessions/", h.handleSessionByID)
-	mux.HandleFunc("/chat", h.handleChat)
-	mux.HandleFunc("/metrics/", h.handleMetrics)
-	mux.HandleFunc("/users/", h.handleUsers)
+	h.registerRoutes(mux, "")
+	h.registerRoutes(mux, "/api")
 	return withCORS(mux)
+}
+
+func (h *Handler) registerRoutes(mux *http.ServeMux, prefix string) {
+	mux.HandleFunc(prefix+"/health", h.handleHealth)
+	mux.HandleFunc(prefix+"/session", h.handleSession)
+	mux.HandleFunc(prefix+"/chat", h.handleChat)
+	mux.HandleFunc(prefix+"/metrics/", h.handleMetrics)
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +165,11 @@ func (h *Handler) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := strings.TrimPrefix(r.URL.Path, "/metrics/")
+	path := r.URL.Path
+	sessionID := strings.TrimPrefix(path, "/metrics/")
+	if strings.HasPrefix(path, "/api/metrics/") {
+		sessionID = strings.TrimPrefix(path, "/api/metrics/")
+	}
 	if sessionID == "" || strings.Contains(sessionID, "/") {
 		writeError(w, http.StatusBadRequest, errors.New("session_id is required"))
 		return

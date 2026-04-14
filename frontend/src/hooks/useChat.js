@@ -26,7 +26,9 @@ export function useChat() {
 
   /* ── Create session on mount ── */
   useEffect(() => {
-    initSession()
+    initSession().catch(() => {
+      // Initial session setup failure is surfaced via error state.
+    })
     return () => clearInterval(pollRef.current)
   }, [])
 
@@ -49,9 +51,12 @@ export function useChat() {
     try {
       const data = await createSession()
       setSessionId(data.session_id)
-    } catch {
-      // Backend not available — generate a local session id for demo
-      setSessionId(`local-${Date.now()}`)
+      setError(null)
+      return data.session_id
+    } catch (err) {
+      setSessionId(null)
+      setError(err instanceof Error ? err.message : 'Failed to create session')
+      throw err
     }
   }
 
@@ -64,7 +69,16 @@ export function useChat() {
     setIsLoading(true)
 
     try {
-      const data = await sendChat(sessionId, prompt)
+      let activeSessionId = sessionId
+      if (!activeSessionId) {
+        activeSessionId = await initSession()
+      }
+
+      if (!activeSessionId) {
+        throw new Error('Session is not available')
+      }
+
+      const data = await sendChat(activeSessionId, prompt)
       const aiMsg = {
         id: Date.now() + 1,
         role: 'ai',
@@ -77,18 +91,20 @@ export function useChat() {
       }
       setMessages(prev => [...prev, aiMsg])
     } catch (err) {
-      // Graceful mock response when backend is offline
-      const mockMsg = {
+      const message = err instanceof Error ? err.message : 'Request failed'
+      setError(message)
+
+      const errorMsg = {
         id: Date.now() + 1,
         role: 'ai',
-        content: `[Backend offline — mock response] You asked: "${prompt}"`,
-        model_used: 'gpt-3.5-turbo',
-        tokens_used: 42,
+        content: `[Request failed] ${message}`,
+        model_used: 'gateway-error',
+        tokens_used: 0,
         tokens_saved: 0,
         cache_hit: false,
         timestamp: new Date(),
       }
-      setMessages(prev => [...prev, mockMsg])
+      setMessages(prev => [...prev, errorMsg])
     } finally {
       setIsLoading(false)
     }

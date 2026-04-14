@@ -22,6 +22,9 @@ type SessionStore interface {
 
 type MLClient interface {
 	Health(ctx context.Context) error
+	QueryCache(ctx context.Context, payload ml.CacheQueryRequest) (ml.CacheQueryResponse, error)
+	StoreCache(ctx context.Context, payload ml.CacheStoreRequest) (ml.CacheStoreResponse, error)
+	Classify(ctx context.Context, payload ml.ClassifyRequest) (ml.ClassifyResponse, error)
 	Summarise(ctx context.Context, payload ml.SummariseRequest) (ml.SummariseResponse, error)
 	Route(ctx context.Context, payload ml.RouteRequest) (ml.RouteResponse, error)
 	Invoke(ctx context.Context, payload ml.InvokeRequest) (ml.InvokeResponse, error)
@@ -130,9 +133,57 @@ func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatRespo
 	}
 	current.Messages = append(current.Messages, userMessage)
 
-	contextSummary := strings.TrimSpace(current.Summary)
-	if contextSummary == "" {
-		contextSummary = buildTranscript(current.Messages[:len(current.Messages)-1])
+	cacheQuery, cacheErr := s.mlClient.QueryCache(ctx, ml.CacheQueryRequest{
+		Prompt: prompt,
+		UserID: current.ID,
+	})
+	if cacheErr != nil {
+		fmt.Printf("[CACHE] query failed, continuing without cache: %v\n", cacheErr)
+	}
+
+	if cacheErr == nil && cacheQuery.CacheHit && cacheQuery.Response != nil {
+		assistantMessage := models.Message{
+			Role:      "assistant",
+			Content:   *cacheQuery.Response,
+			Timestamp: time.Now().UTC(),
+		}
+		current.Messages = append(current.Messages, assistantMessage)
+		current.Metrics.CacheHits++
+
+		if err := s.store.Update(current); err != nil {
+			return ChatResponse{}, err
+		}
+
+		return ChatResponse{
+			Response:    *cacheQuery.Response,
+			ModelUsed:   "semantic-cache",
+			TokensUsed:  0,
+			TokensSaved: 0,
+			CacheHit:    true,
+		}, nil
+	}
+
+	current.Metrics.CacheMisses++
+
+	var contextSummary string
+	classifyResp, classifyErr := s.mlClient.Classify(ctx, ml.ClassifyRequest{Prompt: prompt})
+	needsContext := false
+	if classifyErr != nil {
+		fmt.Printf("[CLASSIFY] classify failed, falling back to prompt-only: %v\n", classifyErr)
+	} else {
+		needsContext = classifyResp.NeedsContext
+	}
+
+	if needsContext {
+		contextSummary = strings.TrimSpace(current.Summary)
+		if contextSummary == "" {
+			refreshedSummary, err := s.refreshContextSummary(ctx, current)
+			if err != nil {
+				fmt.Printf("[CONTEXT] summary refresh failed, using prompt-only fallback: %v\n", err)
+			} else {
+				contextSummary = strings.TrimSpace(refreshedSummary)
+			}
+		}
 	}
 
 	routeResponse, err := s.mlClient.Route(ctx, ml.RouteRequest{
@@ -164,9 +215,20 @@ func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatRespo
 	current.Metrics.TokensSaved += routeResponse.TokensSaved
 	current.Metrics.CostSaved = estimateCostSaved(current.Metrics.TokensSaved)
 
+	classified := cacheQuery.Classified
+	if _, err := s.mlClient.StoreCache(ctx, ml.CacheStoreRequest{
+		Prompt:     prompt,
+		UserID:     current.ID,
+		Response:   invokeResponse.SimulatedResponse,
+		Classified: classified,
+	}); err != nil {
+		fmt.Printf("[CACHE] store failed, continuing without cache write-back: %v\n", err)
+	}
+
 	summarySaved, err := s.maybeSummarise(ctx, current)
 	if err != nil {
-		return ChatResponse{}, err
+		fmt.Printf("[SUMMARISE] periodic summary failed, continuing: %v\n", err)
+		summarySaved = 0
 	}
 	current.Metrics.TokensSaved += summarySaved
 	current.Metrics.CostSaved = estimateCostSaved(current.Metrics.TokensSaved)
@@ -182,6 +244,36 @@ func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatRespo
 		TokensSaved: routeResponse.TokensSaved + summarySaved,
 		CacheHit:    false,
 	}, nil
+}
+
+func (s *Service) refreshContextSummary(ctx context.Context, current *models.Session) (string, error) {
+	priorCount := len(current.Messages) - 1
+	if priorCount <= 0 {
+		return "", nil
+	}
+
+	messages := make([]models.Message, 0, priorCount+1)
+	if current.Summary != "" {
+		messages = append(messages, models.Message{
+			Role:    "system",
+			Content: "Existing conversation summary:\n" + current.Summary,
+		})
+	}
+	messages = append(messages, current.Messages[:priorCount]...)
+
+	summaryResponse, err := s.mlClient.Summarise(ctx, ml.SummariseRequest{Messages: messages})
+	if err != nil {
+		return "", fmt.Errorf("refresh conversation summary: %w", err)
+	}
+
+	updated := strings.TrimSpace(summaryResponse.Summary)
+	if updated == "" {
+		return "", nil
+	}
+
+	current.Summary = updated
+	current.SummarizedMessageCount = priorCount
+	return updated, nil
 }
 
 func (s *Service) maybeSummarise(ctx context.Context, current *models.Session) (int, error) {

@@ -26,6 +26,42 @@ type SummariseResponse struct {
 	TokensSaved int    `json:"tokens_saved"`
 }
 
+type ClassifyRequest struct {
+	Prompt string `json:"prompt"`
+}
+
+type ClassifyResponse struct {
+	NeedsContext bool    `json:"needs_context"`
+	Confidence   float64 `json:"confidence"`
+	Reason       string  `json:"reason"`
+}
+
+type CacheQueryRequest struct {
+	Prompt string `json:"prompt"`
+	UserID string `json:"user_id"`
+}
+
+type CacheQueryResponse struct {
+	CacheHit   bool     `json:"cache_hit"`
+	Response   *string  `json:"response"`
+	CacheLayer string   `json:"cache_layer"`
+	Classified string   `json:"classified"`
+	Score      *float64 `json:"score"`
+}
+
+type CacheStoreRequest struct {
+	Prompt     string `json:"prompt"`
+	UserID     string `json:"user_id"`
+	Response   string `json:"response"`
+	Classified string `json:"classified,omitempty"`
+}
+
+type CacheStoreResponse struct {
+	Status      string `json:"status"`
+	Message     string `json:"message"`
+	StoredLayer string `json:"stored_layer"`
+}
+
 type RouteRequest struct {
 	Prompt  string `json:"prompt"`
 	Context string `json:"context,omitempty"`
@@ -84,6 +120,24 @@ func (c *Client) Health(ctx context.Context) error {
 func (c *Client) Summarise(ctx context.Context, payload SummariseRequest) (SummariseResponse, error) {
 	var response SummariseResponse
 	err := c.postJSON(ctx, "/summarise/", payload, &response)
+	return response, err
+}
+
+func (c *Client) Classify(ctx context.Context, payload ClassifyRequest) (ClassifyResponse, error) {
+	var response ClassifyResponse
+	err := c.postJSON(ctx, "/classify/", payload, &response)
+	return response, err
+}
+
+func (c *Client) QueryCache(ctx context.Context, payload CacheQueryRequest) (CacheQueryResponse, error) {
+	var response CacheQueryResponse
+	err := c.postJSON(ctx, "/cache/query", payload, &response)
+	return response, err
+}
+
+func (c *Client) StoreCache(ctx context.Context, payload CacheStoreRequest) (CacheStoreResponse, error) {
+	var response CacheStoreResponse
+	err := c.postJSON(ctx, "/cache/store", payload, &response)
 	return response, err
 }
 

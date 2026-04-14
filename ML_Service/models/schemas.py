@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -170,15 +170,52 @@ class LLMSimulateResponse(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    prompt: str
-    user_id: str
+    prompt: str = Field(..., min_length=1, description="Prompt to check in semantic cache.")
+    user_id: str = Field(..., min_length=1, description="User identifier for personal cache lookup.")
 
 class QueryResponse(BaseModel):
-    response: str
-    source: str  # e.g., "cache_global", "cache_personal", "llm"
-    tokens_saved: int
+    cache_hit: bool = Field(..., description="True when a semantic cache hit is found.")
+    response: str | None = Field(default=None, description="Cached response when cache_hit is true.")
+    cache_layer: str = Field(..., description="Hit layer: global, personal, or miss.")
+    classified: str = Field(..., description="Prompt classification used by cache: PERSONAL or GENERIC.")
+    score: float | None = Field(default=None, description="Similarity score for cache hits.")
+    model_used: str | None = Field(
+        default=None,
+        description="Embedding model that produced the winning cache hit.",
+    )
+    model_scores: dict[str, float | None] | dict[str, dict[str, float | None]] | None = Field(
+        default=None,
+        description="Per-model similarity scores captured during lookup.",
+    )
+
+
+class CacheStoreRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, description="Original user prompt used as cache key.")
+    user_id: str = Field(..., min_length=1, description="User identifier for personal cache routing.")
+    response: str = Field(..., min_length=1, description="Final model response to store in cache.")
+    classified: str | None = Field(
+        default=None,
+        description="Optional classification override: PERSONAL or GENERIC.",
+    )
+
+
+class CacheStoreResponse(BaseModel):
+    status: str = Field(..., description="Operation status.")
+    message: str = Field(..., description="Human-readable operation message.")
+    stored_layer: str = Field(..., description="Storage layer used: global or personal.")
+    models_stored: list[str] = Field(
+        default_factory=list,
+        description="Embedding-model caches updated by the store operation.",
+    )
 
 class CacheStatsResponse(BaseModel):
-    total_entries: int
-    global_count: int
-    personal_count: int
+    global_entries: int = Field(..., description="Total entries in global cache.")
+    user_stores: dict[str, int] = Field(..., description="Per-user cache entry counts.")
+    model_global_entries: dict[str, int] = Field(
+        default_factory=dict,
+        description="Global cache entry counts per embedding model.",
+    )
+    model_user_stores: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        description="Per-user cache entry counts per embedding model.",
+    )
