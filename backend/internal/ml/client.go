@@ -22,8 +22,15 @@ type SummariseRequest struct {
 }
 
 type SummariseResponse struct {
-	Summary     string `json:"summary"`
-	TokensSaved int    `json:"tokens_saved"`
+	Summary        string  `json:"summary"`
+	TokensSaved    int     `json:"tokens_saved"`
+	TokenBreakdown TokenIO `json:"token_breakdown"`
+}
+
+type TokenIO struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
 }
 
 type ClassifyRequest struct {
@@ -69,12 +76,17 @@ type RouteRequest struct {
 }
 
 type RouteResponse struct {
-	PromptToSend    string `json:"prompt_to_send"`
-	Tier            int    `json:"tier"`
-	Reason          string `json:"reason"`
-	OriginalTokens  int    `json:"original_tokens"`
-	OptimizedTokens int    `json:"optimized_tokens"`
-	TokensSaved     int    `json:"tokens_saved"`
+	PromptToSend    string              `json:"prompt_to_send"`
+	Tier            int                 `json:"tier"`
+	Reason          string              `json:"reason"`
+	OriginalTokens  int                 `json:"original_tokens"`
+	OptimizedTokens int                 `json:"optimized_tokens"`
+	TokensSaved     int                 `json:"tokens_saved"`
+	TokenBreakdown  RouteTokenBreakdown `json:"token_breakdown"`
+}
+
+type RouteTokenBreakdown struct {
+	OptimizePrompt TokenIO `json:"optimize_prompt"`
 }
 
 type InvokeRequest struct {
@@ -83,11 +95,23 @@ type InvokeRequest struct {
 }
 
 type InvokeResponse struct {
-	TierNumber        int      `json:"tier_number"`
-	TierName          string   `json:"tier_name"`
-	ModelUsed         string   `json:"model_used"`
-	ModelsTried       []string `json:"models_tried"`
-	SimulatedResponse string   `json:"simulated_response"`
+	TierNumber        int                  `json:"tier_number"`
+	TierName          string               `json:"tier_name"`
+	ModelUsed         string               `json:"model_used"`
+	ModelsTried       []string             `json:"models_tried"`
+	SimulatedResponse string               `json:"simulated_response"`
+	TokenBreakdown    InvokeTokenBreakdown `json:"token_breakdown"`
+}
+
+type ModelAttemptTokenIO struct {
+	Model        string `json:"model"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+}
+
+type InvokeTokenBreakdown struct {
+	ModelCascade TokenIO               `json:"model_cascade"`
+	Attempts     []ModelAttemptTokenIO `json:"attempts"`
 }
 
 func NewClient(baseURL string, httpClient *http.Client) *Client {

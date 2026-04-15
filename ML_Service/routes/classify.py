@@ -22,6 +22,18 @@ async def classify_prompt(request: ClassifyRequest) -> ClassifyResponse:
     """
     try:
         needs_context, confidence, reason = classify(request.prompt)
+        preview = " ".join(request.prompt.strip().split())
+        if len(preview) > 140:
+            preview = preview[:137] + "..."
+
+        print("\n" + "=" * 60)
+        print("[CLASSIFIER] Context dependency decision")
+        print(f"[CLASSIFIER] prompt        : {preview}")
+        print(f"[CLASSIFIER] needs_context : {needs_context}")
+        print(f"[CLASSIFIER] confidence    : {confidence:.2f}")
+        print(f"[CLASSIFIER] reason        : {reason}")
+        print("=" * 60 + "\n")
+
         return ClassifyResponse(
             needs_context=needs_context,
             confidence=confidence,

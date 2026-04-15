@@ -86,7 +86,10 @@ export function useChat() {
         model_used: data.model_used,
         tokens_used: data.tokens_used,
         tokens_saved: data.tokens_saved,
+        total_tokens_used: data.total_tokens_used,
         cache_hit: data.cache_hit,
+        token_breakdown: data.token_breakdown,
+        workflow: data.workflow,
         timestamp: new Date(),
       }
       setMessages(prev => [...prev, aiMsg])
@@ -101,7 +104,10 @@ export function useChat() {
         model_used: 'gateway-error',
         tokens_used: 0,
         tokens_saved: 0,
+        total_tokens_used: 0,
         cache_hit: false,
+        token_breakdown: null,
+        workflow: null,
         timestamp: new Date(),
       }
       setMessages(prev => [...prev, errorMsg])

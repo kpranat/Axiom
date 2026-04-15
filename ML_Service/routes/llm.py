@@ -59,6 +59,14 @@ async def invoke_llm(request: LLMInvokeRequest) -> LLMInvokeResponse:
             model_used=result.model_used,
             models_tried=result.models_tried,
             simulated_response=result.simulated_response,
+            token_breakdown={
+                "model_cascade": {
+                    "input_tokens": result.cascade_input_tokens,
+                    "output_tokens": result.cascade_output_tokens,
+                    "total_tokens": result.cascade_input_tokens + result.cascade_output_tokens,
+                },
+                "attempts": result.model_attempts,
+            },
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

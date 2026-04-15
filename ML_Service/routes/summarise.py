@@ -14,7 +14,15 @@ async def summarise_conversation(request: SummariseRequest) -> SummariseResponse
     """
     try:
         messages_as_dicts = [m.model_dump() for m in request.messages]
-        summary, tokens_saved = summarize(messages_as_dicts)
-        return SummariseResponse(summary=summary, tokens_saved=tokens_saved)
+        summary, tokens_saved, input_tokens, output_tokens = summarize(messages_as_dicts)
+        return SummariseResponse(
+            summary=summary,
+            tokens_saved=tokens_saved,
+            token_breakdown={
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+            },
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

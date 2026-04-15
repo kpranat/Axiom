@@ -27,7 +27,7 @@ TIER_NAMES: dict[int, str] = {
 TIERS: dict[str, list[str]] = {
     "LOW":  ["llama-3.1-8b-instant"],
     "MID":  ["llama-3.3-70b-versatile"],
-    "HIGH": ["gemini-2.5-flash"],
+    "HIGH": ["gemini-2.5-flash", "llama-3.3-70b-versatile"],
 }
 
 MODEL_DESCRIPTIONS: dict[str, str] = {
@@ -35,6 +35,17 @@ MODEL_DESCRIPTIONS: dict[str, str] = {
     "llama-3.3-70b-versatile": "LLaMA 3.3 70B (REAL) — moderate reasoning, high capacity",
     "gemini-2.5-flash":  "Gemini 2.5 Flash (REAL) — complex reasoning, frontier",
 }
+
+_GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "25"))
+_GEMINI_MAX_ATTEMPTS = max(int(os.getenv("GEMINI_MAX_ATTEMPTS", "3")), 1)
+
+
+def _is_error_response(text: str) -> bool:
+    return (text or "").startswith("[ERROR:")
+
+
+def _is_retryable_gemini_status(status_code: int) -> bool:
+    return status_code in (429, 500, 502, 503, 504)
 
 
 @dataclass
@@ -45,10 +56,19 @@ class DispatchResult:
     prompt_sent: str
     simulated_response: str
     models_tried: list[str] = field(default_factory=list)
+    cascaded: bool = False
+    cascade_input_tokens: int = 0
+    cascade_output_tokens: int = 0
+    model_attempts: list[dict[str, int | str]] = field(default_factory=list)
 
 
-def _simulate_model_call(model: str, prompt: str) -> str:
-    """Return a canned response or make a real API call."""
+def _rough_token_count(text: str) -> int:
+    return len((text or "").split())
+
+
+def _simulate_model_call(model: str, prompt: str) -> tuple[str, int, int]:
+    """Return response text with input/output token counts."""
+    default_input = _rough_token_count(prompt)
     if model in ("llama-3.1-8b-instant", "llama-3.3-70b-versatile"):
         try:
             client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -59,28 +79,96 @@ def _simulate_model_call(model: str, prompt: str) -> str:
                 ],
                 temperature=0.7,
             )
-            return completion.choices[0].message.content
+            text = completion.choices[0].message.content
+            usage = getattr(completion, "usage", None)
+            input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            if input_tokens <= 0:
+                input_tokens = default_input
+            if output_tokens <= 0:
+                output_tokens = _rough_token_count(text)
+            return text, input_tokens, output_tokens
         except Exception as e:
-            return f"[ERROR: Groq API failed] {str(e)}"
+            text = f"[ERROR: Groq API failed] {str(e)}"
+            return text, default_input, _rough_token_count(text)
 
     elif model == "gemini-2.5-flash":
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={os.getenv('GEMINI_API_KEY')}"
-            headers = {"Content-Type": "application/json"}
-            payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            
-            response = requests.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            return f"[ERROR: Gemini API failed] {str(e)}"
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            text = "[ERROR: Gemini API failed] Missing GEMINI_API_KEY"
+            return text, default_input, _rough_token_count(text)
 
-    return (
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+
+        for attempt in range(1, _GEMINI_MAX_ATTEMPTS + 1):
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=_GEMINI_TIMEOUT_SECONDS,
+                )
+
+                if _is_retryable_gemini_status(response.status_code) and attempt < _GEMINI_MAX_ATTEMPTS:
+                    backoff_seconds = 0.5 * attempt
+                    print(
+                        f"     Warning       : Gemini HTTP {response.status_code} on attempt "
+                        f"{attempt}/{_GEMINI_MAX_ATTEMPTS}; retrying in {backoff_seconds:.1f}s..."
+                    )
+                    time.sleep(backoff_seconds)
+                    continue
+
+                response.raise_for_status()
+                data = response.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                usage = data.get("usageMetadata", {})
+                input_tokens = int(usage.get("promptTokenCount", 0) or 0)
+                output_tokens = int(usage.get("candidatesTokenCount", 0) or 0)
+                if input_tokens <= 0:
+                    input_tokens = default_input
+                if output_tokens <= 0:
+                    output_tokens = _rough_token_count(text)
+                return text, input_tokens, output_tokens
+
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response is not None else 0
+                if _is_retryable_gemini_status(status) and attempt < _GEMINI_MAX_ATTEMPTS:
+                    backoff_seconds = 0.5 * attempt
+                    print(
+                        f"     Warning       : Gemini HTTP {status} on attempt "
+                        f"{attempt}/{_GEMINI_MAX_ATTEMPTS}; retrying in {backoff_seconds:.1f}s..."
+                    )
+                    time.sleep(backoff_seconds)
+                    continue
+
+                text = f"[ERROR: Gemini API failed] HTTP {status}"
+                return text, default_input, _rough_token_count(text)
+
+            except requests.RequestException:
+                if attempt < _GEMINI_MAX_ATTEMPTS:
+                    backoff_seconds = 0.5 * attempt
+                    print(
+                        f"     Warning       : Gemini request failed on attempt "
+                        f"{attempt}/{_GEMINI_MAX_ATTEMPTS}; retrying in {backoff_seconds:.1f}s..."
+                    )
+                    time.sleep(backoff_seconds)
+                    continue
+
+                text = "[ERROR: Gemini API failed] Request error"
+                return text, default_input, _rough_token_count(text)
+
+            except Exception:
+                text = "[ERROR: Gemini API failed] Unexpected error"
+                return text, default_input, _rough_token_count(text)
+
+    text = (
         f"[SIMULATED RESPONSE from {model}]\n"
         f"Prompt received ({len(prompt.split())} tokens). "
         f"This is a placeholder response — wire up the real {model} API here."
     )
+    return text, default_input, _rough_token_count(text)
 
 
 def dispatch(prompt: str, tier: int) -> DispatchResult:
@@ -106,6 +194,9 @@ def dispatch(prompt: str, tier: int) -> DispatchResult:
         models.extend(TIERS.get(TIER_NAMES.get(t, "LOW"), []))
     
     models_tried: list[str] = []
+    model_attempts: list[dict[str, int | str]] = []
+    cascade_input_tokens = 0
+    cascade_output_tokens = 0
 
     # ── Header banner ─────────────────────────────────────────────────────────
     separator = "=" * 60
@@ -141,8 +232,22 @@ def dispatch(prompt: str, tier: int) -> DispatchResult:
         time.sleep(0.05)
 
         # In production: replace this block with a real API call.
-        response = _simulate_model_call(model, prompt)
+        response, input_tokens, output_tokens = _simulate_model_call(model, prompt)
         model_used = model
+        cascade_input_tokens += input_tokens
+        cascade_output_tokens += output_tokens
+        model_attempts.append({
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        })
+
+        if _is_error_response(response):
+            if model != models[-1]:
+                print("     Result        : PROVIDER ERROR — CASCADING UP...")
+                continue
+            print("     Result        : FAILED (final provider unavailable)")
+            break
 
         # Parse confidence score from the JSON block at the end
         confidence = 1.0  # Default to pass if no score found
@@ -172,4 +277,8 @@ def dispatch(prompt: str, tier: int) -> DispatchResult:
         prompt_sent=prompt,
         simulated_response=response,
         models_tried=models_tried,
+        cascaded=len(models_tried) > 1,
+        cascade_input_tokens=cascade_input_tokens,
+        cascade_output_tokens=cascade_output_tokens,
+        model_attempts=model_attempts,
     )

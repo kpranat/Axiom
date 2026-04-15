@@ -2,6 +2,38 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class TokenIO(BaseModel):
+    """Input/output token counters for a single pipeline step."""
+
+    input_tokens: int = Field(..., ge=0, description="Token count entering the step.")
+    output_tokens: int = Field(..., ge=0, description="Token count produced by the step.")
+    total_tokens: int = Field(..., ge=0, description="Total tokens for the step (input + output).")
+
+
+class RouteTokenBreakdown(BaseModel):
+    """Step-wise token accounting produced by the /route endpoint."""
+
+    optimize_prompt: TokenIO = Field(..., description="Token I/O for prompt optimization.")
+
+
+class ModelAttemptTokenIO(BaseModel):
+    """Token accounting for one model attempt in the cascade."""
+
+    model: str = Field(..., description="Model identifier.")
+    input_tokens: int = Field(..., ge=0, description="Tokens sent to this model.")
+    output_tokens: int = Field(..., ge=0, description="Tokens returned by this model.")
+
+
+class LLMTokenBreakdown(BaseModel):
+    """Token accounting produced by the /llm/invoke endpoint."""
+
+    model_cascade: TokenIO = Field(..., description="Aggregate token I/O across cascade attempts.")
+    attempts: list[ModelAttemptTokenIO] = Field(
+        default_factory=list,
+        description="Per-model token I/O for each cascade attempt in order.",
+    )
+
+
 class Message(BaseModel):
     """Represents a single chat message."""
 
@@ -24,6 +56,7 @@ class SummariseResponse(BaseModel):
 
     summary: str = Field(..., description="A 5-sentence summary of the conversation.")
     tokens_saved: int = Field(..., description="Estimated number of tokens saved by summarising.")
+    token_breakdown: TokenIO = Field(..., description="Token I/O for the summary generation step.")
 
 
 class ClassifyRequest(BaseModel):
@@ -109,6 +142,10 @@ class RouteResponse(BaseModel):
         ...,
         description="Token reduction achieved by the optimizer (original − optimized, ≥ 0).",
     )
+    token_breakdown: RouteTokenBreakdown = Field(
+        ...,
+        description="Token I/O details for route-time preprocessing steps.",
+    )
 
 
 class LLMInvokeRequest(BaseModel):
@@ -140,6 +177,10 @@ class LLMInvokeResponse(BaseModel):
     simulated_response: str = Field(
         ...,
         description="Placeholder LLM response (real API call goes here in production).",
+    )
+    token_breakdown: LLMTokenBreakdown = Field(
+        ...,
+        description="Token I/O details for the model cascade execution.",
     )
 
 

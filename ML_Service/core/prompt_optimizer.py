@@ -47,6 +47,8 @@ class OptimizeResult:
     original_tokens: int    # rough word-count before optimization
     optimized_tokens: int   # rough word-count after optimization
     tokens_saved: int       # delta (never negative)
+    optimize_input_tokens: int
+    optimize_output_tokens: int
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -134,9 +136,12 @@ def optimize(
             original_tokens=0,
             optimized_tokens=0,
             tokens_saved=0,
+            optimize_input_tokens=0,
+            optimize_output_tokens=0,
         )
 
-    original_tokens = _rough_token_count(prompt)
+    optimize_input_tokens = _rough_token_count(prompt)
+    original_tokens = optimize_input_tokens
     if context:
         original_tokens += _rough_token_count(context)
 
@@ -153,6 +158,7 @@ def optimize(
     )
 
     optimized_raw: str = response.choices[0].message.content.strip()
+    optimize_output_tokens = _rough_token_count(optimized_raw)
 
     # Assemble the final prompt that goes to the downstream tier model
     final_prompt = _build_final_prompt(optimized_raw, context)
@@ -165,4 +171,6 @@ def optimize(
         original_tokens=original_tokens,
         optimized_tokens=optimized_tokens,
         tokens_saved=tokens_saved,
+        optimize_input_tokens=optimize_input_tokens,
+        optimize_output_tokens=optimize_output_tokens,
     )
