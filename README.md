@@ -71,7 +71,7 @@ The backend calls Python ML endpoints through `internal/ml/client.go`:
 
 - `GET /health`
 - `POST /classify/`
-- `POST /summarise/`
+- `POST /summarise/` (summarize conversation context)
 - `POST /cache/query`
 - `POST /cache/store`
 - `POST /route`
@@ -160,9 +160,6 @@ Defined in `internal/config/config.go`:
 
 - `backend/internal/session/id.go`  
   Session/message ID generation (crypto-random hex, with timestamp fallback).
-
-- `backend/internal/session/store.go` + `supabase_store.go`  
-  Both implement the same store contract consumed by orchestrator.
 
 ### Shared models/config
 
