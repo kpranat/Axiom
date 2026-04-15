@@ -9,7 +9,7 @@ load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
-def summarize(messages: list[dict]) -> Tuple[str, int]:
+def summarize(messages: list[dict]) -> Tuple[str, int, int, int]:
     """
     Summarises a list of conversation messages into a compact 5-sentence summary
     using Groq (llama-3.1-8b-instant) and returns the summary alongside the number of tokens saved.
@@ -18,7 +18,7 @@ def summarize(messages: list[dict]) -> Tuple[str, int]:
         messages: A list of dicts with keys 'role' and 'content'.
 
     Returns:
-        Tuple of (summary: str, tokens_saved: int)
+        Tuple of (summary: str, tokens_saved: int, input_tokens: int, output_tokens: int)
     """
     history_text = "\n".join(
         f"{m['role'].upper()}: {m['content']}" for m in messages
@@ -48,5 +48,7 @@ def summarize(messages: list[dict]) -> Tuple[str, int]:
     )
 
     summary = resp.choices[0].message.content
-    tokens_saved = resp.usage.prompt_tokens - resp.usage.completion_tokens
-    return summary, max(tokens_saved, 0)
+    input_tokens = int(getattr(resp.usage, "prompt_tokens", 0) or 0)
+    output_tokens = int(getattr(resp.usage, "completion_tokens", 0) or 0)
+    tokens_saved = input_tokens - output_tokens
+    return summary, max(tokens_saved, 0), input_tokens, output_tokens

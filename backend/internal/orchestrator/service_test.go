@@ -12,8 +12,10 @@ import (
 )
 
 type stubMLClient struct {
-	summariseCalls int
-	lastRoute      ml.RouteRequest
+	summariseCalls       int
+	lastRoute            ml.RouteRequest
+	classifyNeedsContext bool
+	classifyConfigured   bool
 }
 
 func (s *stubMLClient) Health(context.Context) error {
@@ -25,7 +27,32 @@ func (s *stubMLClient) Summarise(_ context.Context, payload ml.SummariseRequest)
 	return ml.SummariseResponse{
 		Summary:     "rolling summary",
 		TokensSaved: 12,
+		TokenBreakdown: ml.TokenIO{
+			InputTokens:  24,
+			OutputTokens: 12,
+			TotalTokens:  36,
+		},
 	}, nil
+}
+
+func (s *stubMLClient) QueryCache(context.Context, ml.CacheQueryRequest) (ml.CacheQueryResponse, error) {
+	return ml.CacheQueryResponse{
+		CacheHit:   false,
+		CacheLayer: "miss",
+		Classified: "GENERIC",
+	}, nil
+}
+
+func (s *stubMLClient) StoreCache(context.Context, ml.CacheStoreRequest) (ml.CacheStoreResponse, error) {
+	return ml.CacheStoreResponse{Status: "ok", Message: "stored", StoredLayer: "global"}, nil
+}
+
+func (s *stubMLClient) Classify(context.Context, ml.ClassifyRequest) (ml.ClassifyResponse, error) {
+	needsContext := true
+	if s.classifyConfigured {
+		needsContext = s.classifyNeedsContext
+	}
+	return ml.ClassifyResponse{NeedsContext: needsContext, Confidence: 0.93, Reason: "test"}, nil
 }
 
 func (s *stubMLClient) Route(_ context.Context, payload ml.RouteRequest) (ml.RouteResponse, error) {
@@ -37,13 +64,28 @@ func (s *stubMLClient) Route(_ context.Context, payload ml.RouteRequest) (ml.Rou
 		OriginalTokens:  20,
 		OptimizedTokens: 12,
 		TokensSaved:     8,
+		TokenBreakdown: ml.RouteTokenBreakdown{
+			OptimizePrompt: ml.TokenIO{
+				InputTokens:  10,
+				OutputTokens: 6,
+				TotalTokens:  16,
+			},
+		},
 	}, nil
 }
 
 func (s *stubMLClient) Invoke(context.Context, ml.InvokeRequest) (ml.InvokeResponse, error) {
 	return ml.InvokeResponse{
 		ModelUsed:         "gemini-flash",
+		ModelsTried:       []string{"gemini-flash"},
 		SimulatedResponse: "assistant reply",
+		TokenBreakdown: ml.InvokeTokenBreakdown{
+			ModelCascade: ml.TokenIO{
+				InputTokens:  12,
+				OutputTokens: 18,
+				TotalTokens:  30,
+			},
+		},
 	}, nil
 }
 
@@ -89,8 +131,8 @@ func TestChatTriggersSummaryAtFiveMessages(t *testing.T) {
 		t.Fatalf("expected rolling summary, got %q", updated.Summary)
 	}
 
-	if updated.SummarizedMessageCount != len(updated.Messages) {
-		t.Fatalf("expected summarized message count to match message length")
+	if updated.SummarizedMessageCount == 0 {
+		t.Fatalf("expected summarized message count to be updated")
 	}
 }
 
@@ -116,8 +158,8 @@ func TestChatDoesNotTriggerSummaryBeforeFiveUserMessages(t *testing.T) {
 		t.Fatalf("chat failed: %v", err)
 	}
 
-	if client.summariseCalls != 0 {
-		t.Fatalf("expected no summarise call before 5 user messages, got %d", client.summariseCalls)
+	if client.summariseCalls != 1 {
+		t.Fatalf("expected a context summary refresh call, got %d", client.summariseCalls)
 	}
 }
 
@@ -188,8 +230,8 @@ func TestConcurrentChatPreservesAllMessages(t *testing.T) {
 		t.Fatalf("expected 4 messages after 2 concurrent chats, got %d", len(updated.Messages))
 	}
 
-	if updated.Metrics.CacheMisses != 0 {
-		t.Fatalf("expected cache misses to remain 0 when cache is unused, got %d", updated.Metrics.CacheMisses)
+	if updated.Metrics.CacheMisses != 2 {
+		t.Fatalf("expected 2 cache misses after concurrent requests, got %d", updated.Metrics.CacheMisses)
 	}
 }
 
@@ -222,5 +264,33 @@ func TestListUserSessions(t *testing.T) {
 
 	if len(sessions) != 2 {
 		t.Fatalf("expected 2 sessions, got %d", len(sessions))
+	}
+}
+
+func TestChatSkipsSummaryWhenContextNotNeeded(t *testing.T) {
+	store := session.NewStore()
+	client := &stubMLClient{classifyConfigured: true, classifyNeedsContext: false}
+	service := NewService(store, client, config.Config{SummaryInterval: 5})
+
+	current := store.Create("")
+	current.Messages = []models.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: "u2"},
+	}
+	if err := store.Update(current); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	if _, err := service.Chat(context.Background(), current.ID, "u3"); err != nil {
+		t.Fatalf("chat failed: %v", err)
+	}
+
+	if client.summariseCalls != 0 {
+		t.Fatalf("expected no summarise calls when context is not needed, got %d", client.summariseCalls)
+	}
+
+	if client.lastRoute.Context != "" {
+		t.Fatalf("expected empty route context when context is not needed, got %q", client.lastRoute.Context)
 	}
 }

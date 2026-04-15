@@ -19,9 +19,105 @@ Decision rule:
 Weights are intentionally kept small; see _SIGNALS for rationale.
 """
 
+import os
 import re
+from pathlib import Path
+from threading import Lock
 from dataclasses import dataclass
 from typing import Optional
+
+try:
+    import torch
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+except Exception:  # pragma: no cover - optional runtime dependency
+    torch = None
+    AutoModelForSequenceClassification = None
+    AutoTokenizer = None
+
+
+_MODEL_LOCK = Lock()
+_MODEL_LOADED = False
+_MODEL_TOKENIZER = None
+_MODEL = None
+_MODEL_DEVICE = None
+
+
+def _candidate_model_paths() -> list[Path]:
+    candidates: list[Path] = []
+    configured = os.getenv("AXIOM_CLASSIFIER_MODEL_PATH", "").strip()
+    if configured:
+        candidates.append(Path(configured))
+
+    service_root = Path(__file__).resolve().parents[1]
+    candidates.append(service_root / "ContextClassifierMl" / "my_custom_router_native")
+    candidates.append(service_root / "my_custom_router_native")
+    return candidates
+
+
+def _ensure_native_model_loaded() -> None:
+    global _MODEL_LOADED, _MODEL_TOKENIZER, _MODEL, _MODEL_DEVICE
+    if _MODEL_LOADED:
+        return
+
+    with _MODEL_LOCK:
+        if _MODEL_LOADED:
+            return
+
+        if torch is None or AutoTokenizer is None or AutoModelForSequenceClassification is None:
+            _MODEL_LOADED = True
+            return
+
+        for model_path in _candidate_model_paths():
+            if not model_path.exists():
+                continue
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(str(model_path))
+                model = AutoModelForSequenceClassification.from_pretrained(str(model_path))
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                model.to(device)
+                model.eval()
+
+                _MODEL_TOKENIZER = tokenizer
+                _MODEL = model
+                _MODEL_DEVICE = device
+                _MODEL_LOADED = True
+                return
+            except Exception:
+                continue
+
+        _MODEL_LOADED = True
+
+
+def _classify_with_native_model(prompt: str) -> tuple[bool, float, str] | None:
+    _ensure_native_model_loaded()
+    if _MODEL is None or _MODEL_TOKENIZER is None or _MODEL_DEVICE is None or torch is None:
+        return None
+
+    try:
+        inputs = _MODEL_TOKENIZER(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=96,
+        ).to(_MODEL_DEVICE)
+
+        with torch.inference_mode():
+            outputs = _MODEL(**inputs)
+            probs = torch.softmax(outputs.logits, dim=-1)[0]
+
+        standalone_prob = float(probs[0].item())
+        context_prob = float(probs[1].item())
+        needs_context = context_prob >= standalone_prob
+        confidence = max(context_prob, standalone_prob)
+
+        if needs_context:
+            reason = "Transformer classifier detected context dependency"
+        else:
+            reason = "Transformer classifier detected standalone intent"
+
+        return needs_context, round(confidence, 2), reason
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +394,7 @@ def _score(prompt: str) -> tuple[int, int, str, bool, bool]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def classify(prompt: str) -> tuple[bool, float, str]:
+def _classify_rule_based(prompt: str) -> tuple[bool, float, str]:
     """
     Classify whether a user prompt requires prior conversation context.
 
@@ -339,3 +435,10 @@ def classify(prompt: str) -> tuple[bool, float, str]:
     # ---------------------------------------
 
     return needs_context, round(confidence, 2), reason
+
+
+def classify(prompt: str) -> tuple[bool, float, str]:
+    model_result = _classify_with_native_model(prompt)
+    if model_result is not None:
+        return model_result
+    return _classify_rule_based(prompt)
