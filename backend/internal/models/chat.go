@@ -18,12 +18,12 @@ type SessionMetrics struct {
 }
 
 type Session struct {
-	ID                     string
-	UserID                 string
-	Messages               []Message
-	Summary                string
-	SummarizedMessageCount int
-	Metrics                SessionMetrics
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID                     string         `json:"id"`
+	UserID                 string         `json:"user_id,omitempty"`
+	Messages               []Message      `json:"messages"`
+	Summary                string         `json:"summary"`
+	SummarizedMessageCount int            `json:"summarized_message_count"`
+	Metrics                SessionMetrics `json:"metrics"`
+	CreatedAt              time.Time      `json:"created_at"`
+	UpdatedAt              time.Time      `json:"updated_at"`
 }
