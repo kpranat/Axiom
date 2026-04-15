@@ -57,20 +57,21 @@ func NewSupabaseStore(baseURL, apiKey string, httpClient *http.Client) (*Supabas
 	}, nil
 }
 
-func (s *SupabaseStore) Create(userID string) *models.Session {
+func (s *SupabaseStore) Create(userID string) (*models.Session, error) {
 	now := time.Now().UTC()
 	current := &models.Session{
 		ID:        NewID(),
 		UserID:    userID,
+		Messages:  []models.Message{},
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 
 	if err := s.Update(current); err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return cloneSession(current)
+	return CloneSession(current), nil
 }
 
 func (s *SupabaseStore) Get(sessionID string) (*models.Session, error) {
@@ -259,6 +260,7 @@ func hydrateSession(row sessionRecord, messages []messageRecord) *models.Session
 	current := &models.Session{
 		ID:                     row.ID,
 		UserID:                 row.UserID,
+		Messages:               []models.Message{},
 		Summary:                row.Summary,
 		SummarizedMessageCount: row.SummarizedMessageCount,
 		Metrics: models.SessionMetrics{

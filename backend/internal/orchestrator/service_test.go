@@ -2,14 +2,90 @@ package orchestrator
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"axiom/backend/internal/config"
 	"axiom/backend/internal/ml"
 	"axiom/backend/internal/models"
 	"axiom/backend/internal/session"
 )
+
+type fakeStore struct {
+	mu       sync.RWMutex
+	sessions map[string]*models.Session
+}
+
+func newFakeStore() *fakeStore {
+	return &fakeStore{sessions: make(map[string]*models.Session)}
+}
+
+func (s *fakeStore) Create(userID string) (*models.Session, error) {
+	now := time.Now().UTC()
+	current := &models.Session{
+		ID:        session.NewID(),
+		UserID:    userID,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[current.ID] = session.CloneSession(current)
+	return session.CloneSession(current), nil
+}
+
+func (s *fakeStore) Get(sessionID string) (*models.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, ok := s.sessions[sessionID]
+	if !ok {
+		return nil, session.ErrSessionNotFound
+	}
+
+	return session.CloneSession(current), nil
+}
+
+func (s *fakeStore) Update(current *models.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.sessions[current.ID]; !ok {
+		return session.ErrSessionNotFound
+	}
+
+	current.UpdatedAt = time.Now().UTC()
+	s.sessions[current.ID] = session.CloneSession(current)
+	return nil
+}
+
+func (s *fakeStore) ListByUser(userID string) ([]*models.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	sessions := make([]*models.Session, 0)
+	for _, current := range s.sessions {
+		if current.UserID == userID {
+			sessions = append(sessions, session.CloneSession(current))
+		}
+	}
+
+	slices.SortFunc(sessions, func(a, b *models.Session) int {
+		switch {
+		case a.UpdatedAt.After(b.UpdatedAt):
+			return -1
+		case a.UpdatedAt.Before(b.UpdatedAt):
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	return sessions, nil
+}
 
 type stubMLClient struct {
 	summariseCalls       int
@@ -90,11 +166,14 @@ func (s *stubMLClient) Invoke(context.Context, ml.InvokeRequest) (ml.InvokeRespo
 }
 
 func TestChatTriggersSummaryAtFiveMessages(t *testing.T) {
-	store := session.NewStore()
+	store := newFakeStore()
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
-	current := store.Create("")
+	current, err := store.Create("")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
 	current.Messages = []models.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: "a1"},
@@ -137,11 +216,14 @@ func TestChatTriggersSummaryAtFiveMessages(t *testing.T) {
 }
 
 func TestChatDoesNotTriggerSummaryBeforeFiveUserMessages(t *testing.T) {
-	store := session.NewStore()
+	store := newFakeStore()
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
-	current := store.Create("")
+	current, err := store.Create("")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
 	current.Messages = []models.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: "a1"},
@@ -164,11 +246,14 @@ func TestChatDoesNotTriggerSummaryBeforeFiveUserMessages(t *testing.T) {
 }
 
 func TestChatUsesExistingSummaryAsContext(t *testing.T) {
-	store := session.NewStore()
+	store := newFakeStore()
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
-	current := store.Create("")
+	current, err := store.Create("")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
 	current.Summary = "existing summary"
 	if err := store.Update(current); err != nil {
 		t.Fatalf("seed session: %v", err)
@@ -184,7 +269,7 @@ func TestChatUsesExistingSummaryAsContext(t *testing.T) {
 }
 
 func TestCreateSessionDoesNotDependOnMLHealth(t *testing.T) {
-	store := session.NewStore()
+	store := newFakeStore()
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
@@ -202,11 +287,14 @@ func TestCreateSessionDoesNotDependOnMLHealth(t *testing.T) {
 }
 
 func TestConcurrentChatPreservesAllMessages(t *testing.T) {
-	store := session.NewStore()
+	store := newFakeStore()
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 100})
 
-	current := store.Create("")
+	current, err := store.Create("")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
 
 	var wg sync.WaitGroup
 	prompts := []string{"first", "second"}
@@ -236,23 +324,32 @@ func TestConcurrentChatPreservesAllMessages(t *testing.T) {
 }
 
 func TestListUserSessions(t *testing.T) {
-	store := session.NewStore()
+	store := newFakeStore()
 	client := &stubMLClient{}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
-	first := store.Create("user-1")
+	first, err := store.Create("user-1")
+	if err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
 	first.Messages = []models.Message{{ID: "m1", Role: "user", Content: "hello"}}
 	first.Summary = "first summary"
 	if err := store.Update(first); err != nil {
 		t.Fatalf("update first session: %v", err)
 	}
 
-	second := store.Create("user-1")
+	second, err := store.Create("user-1")
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
 	if err := store.Update(second); err != nil {
 		t.Fatalf("update second session: %v", err)
 	}
 
-	third := store.Create("user-2")
+	third, err := store.Create("user-2")
+	if err != nil {
+		t.Fatalf("create third session: %v", err)
+	}
 	if err := store.Update(third); err != nil {
 		t.Fatalf("update third session: %v", err)
 	}
@@ -268,11 +365,14 @@ func TestListUserSessions(t *testing.T) {
 }
 
 func TestChatSkipsSummaryWhenContextNotNeeded(t *testing.T) {
-	store := session.NewStore()
+	store := newFakeStore()
 	client := &stubMLClient{classifyConfigured: true, classifyNeedsContext: false}
 	service := NewService(store, client, config.Config{SummaryInterval: 5})
 
-	current := store.Create("")
+	current, err := store.Create("")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
 	current.Messages = []models.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: "a1"},

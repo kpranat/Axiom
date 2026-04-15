@@ -14,24 +14,21 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("config error: %v. Set these in Koyeb environment variables or backend/.env for local runs", err)
+	}
 
 	httpClient := &http.Client{
 		Timeout: cfg.RequestTimeout,
 	}
 
 	mlClient := ml.NewClient(cfg.MLServiceBaseURL, httpClient)
-	var store orchestrator.SessionStore
-	if cfg.SupabaseURL != "" && cfg.SupabaseKey != "" {
-		supabaseStore, err := session.NewSupabaseStore(cfg.SupabaseURL, cfg.SupabaseKey, httpClient)
-		if err != nil {
-			log.Fatalf("supabase store init failed: %v", err)
-		}
-		store = supabaseStore
-		log.Printf("session store: supabase")
-	} else {
-		store = session.NewStore()
-		log.Printf("session store: in-memory fallback")
+	store, err := session.NewSupabaseStore(cfg.SupabaseURL, cfg.SupabaseKey, httpClient)
+	if err != nil {
+		log.Fatalf("supabase store init failed: %v", err)
 	}
+	log.Printf("session store: supabase")
+
 	service := orchestrator.NewService(store, mlClient, cfg)
 	handler := httpapi.NewHandler(service)
 
