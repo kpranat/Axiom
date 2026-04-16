@@ -23,6 +23,7 @@ export function useChat() {
   const [metrics, setMetrics] = useState(INITIAL_METRICS)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [isViewingHistory, setIsViewingHistory] = useState(false)
   const pollRef = useRef(null)
 
   /* ── Create session on mount ── */
@@ -50,14 +51,16 @@ export function useChat() {
     try {
       const data = await createSession()
       setSessionId(data.session_id)
+      setIsViewingHistory(false)
     } catch {
       // Backend not available — generate a local session id for demo
       setSessionId(`local-${Date.now()}`)
+      setIsViewingHistory(false)
     }
   }
 
   const sendMessage = useCallback(async (prompt) => {
-    if (!prompt.trim() || isLoading) return
+    if (!sessionId || !prompt.trim() || isLoading) return
     setError(null)
 
     const userMsg = { id: Date.now(), role: 'user', content: prompt }
@@ -96,8 +99,8 @@ export function useChat() {
   }, [sessionId, isLoading])
 
   const startNewChat = useCallback(() => {
-    // Only archive if there are actual messages
-    if (messages.length > 0) {
+    // Only archive the live session. Archived views are snapshots and should not be duplicated.
+    if (!isViewingHistory && messages.length > 0) {
       setSessions(prev => [
         { id: Date.now(), messages: [...messages], timestamp: new Date() },
         ...prev
@@ -105,23 +108,28 @@ export function useChat() {
     }
     setMessages([])
     setMetrics(INITIAL_METRICS)
+    setIsViewingHistory(false)
+    setSessionId(null)
     clearInterval(pollRef.current)
     initSession()
-  }, [messages])
+  }, [messages, isViewingHistory])
 
   const loadSession = useCallback((sessionIdToLoad) => {
     const session = sessions.find(s => s.id === sessionIdToLoad)
     if (session) {
-      // Archive current messages first if needed, though usually user clicks history from an empty state or wants to swap
-      if (messages.length > 0) {
+      // Archive the current live conversation once when jumping into history.
+      if (!isViewingHistory && messages.length > 0) {
         setSessions(prev => [
           { id: Date.now(), messages: [...messages], timestamp: new Date() },
           ...prev.filter(s => s.id !== sessionIdToLoad)
         ])
       }
-      setMessages(session.messages)
+      setMessages([...session.messages])
+      setIsViewingHistory(true)
+      setSessionId(null)
+      clearInterval(pollRef.current)
     }
-  }, [sessions, messages])
+  }, [sessions, messages, isViewingHistory])
 
-  return { messages, sessions, metrics, isLoading, error, sessionId, sendMessage, startNewChat, loadSession }
+  return { messages, sessions, metrics, isLoading, error, sessionId, isViewingHistory, sendMessage, startNewChat, loadSession }
 }

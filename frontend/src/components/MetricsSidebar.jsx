@@ -17,7 +17,7 @@ const formatNum = (n) => (n || 0).toLocaleString()
 const SIDEBAR_SPRING = { type: 'spring', stiffness: 280, damping: 30 }
 const FADE_TRANSITION = { duration: 0.18, ease: 'easeOut' }
 
-export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoadSession, isOpen, onToggle, theme }) {
+export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoadSession, isOpen, onToggle, theme, isViewingHistory }) {
   const [searchQuery, setSearchQuery] = React.useState('')
   const [isAccountMenuOpen, setIsAccountMenuOpen] = React.useState(false)
   const [rotationAngle, setRotationAngle] = React.useState(isOpen ? 360 : 0)
@@ -40,16 +40,14 @@ export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoad
      3. If not searching, just list the sessions by their first user message.
   */
   const activeSessionId = 'active'
-  const activeFirstMsg = messages.find(m => m.role === 'user')
 
   const historyItems = React.useMemo(() => {
     const q = searchQuery.toLowerCase().trim()
 
     // Archive format is { id, messages, timestamp }
-    const allStacks = [
-      { id: activeSessionId, messages: messages },
-      ...sessions
-    ]
+    const allStacks = isViewingHistory
+      ? [...sessions]
+      : [{ id: activeSessionId, messages: messages }, ...sessions]
 
     if (q) {
       const results = []
@@ -76,7 +74,7 @@ export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoad
         content: s.messages.find(m => m.role === 'user')?.content || 'Empty Chat',
         isSearchMatch: false
       }))
-  }, [messages, sessions, searchQuery])
+  }, [messages, sessions, searchQuery, isViewingHistory])
 
   return (
     <motion.aside
