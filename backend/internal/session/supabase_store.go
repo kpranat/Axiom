@@ -44,6 +44,16 @@ type messageRecord struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type userRecord struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"password_hash"`
+	PasswordSalt string    `json:"password_salt"`
+	Plan         string    `json:"plan"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 func NewSupabaseStore(baseURL, apiKey string, httpClient *http.Client) (*SupabaseStore, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	if baseURL == "" || apiKey == "" {
@@ -166,6 +176,58 @@ func (s *SupabaseStore) ListByUser(userID string) ([]*models.Session, error) {
 	return sessions, nil
 }
 
+func (s *SupabaseStore) CreateUser(email, passwordHash, passwordSalt, plan string) (*models.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	now := time.Now().UTC()
+	rows, err := s.insertUsers(ctx, []userRecord{{
+		ID:           NewID(),
+		Email:        email,
+		PasswordHash: passwordHash,
+		PasswordSalt: passwordSalt,
+		Plan:         plan,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}})
+	if err != nil {
+		lower := strings.ToLower(err.Error())
+		if strings.Contains(lower, "duplicate") || strings.Contains(lower, "unique") {
+			return nil, ErrUserAlreadyExists
+		}
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, errors.New("supabase user create returned no rows")
+	}
+
+	return hydrateUser(rows[0]), nil
+}
+
+func (s *SupabaseStore) GetUserByEmail(email string) (*models.AuthUserRecord, error) {
+	rows, err := s.selectUsers("email=eq."+url.QueryEscape(email), "")
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrUserNotFound
+	}
+
+	return hydrateAuthUser(rows[0]), nil
+}
+
+func (s *SupabaseStore) GetUserByID(userID string) (*models.AuthUserRecord, error) {
+	rows, err := s.selectUsers("id=eq."+url.QueryEscape(userID), "")
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrUserNotFound
+	}
+
+	return hydrateAuthUser(rows[0]), nil
+}
+
 func (s *SupabaseStore) selectSessions(ctx context.Context, filter, order string) ([]sessionRecord, error) {
 	path := "/rest/v1/chat_sessions?select=*"
 	if filter != "" {
@@ -193,6 +255,60 @@ func (s *SupabaseStore) selectMessages(ctx context.Context, filter, order string
 
 	var rows []messageRecord
 	if err := s.getJSON(ctx, path, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *SupabaseStore) selectUsers(filter, order string) ([]userRecord, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	path := "/rest/v1/app_users?select=*"
+	if filter != "" {
+		path += "&" + filter
+	}
+	if order != "" {
+		path += "&order=" + order
+	}
+
+	var rows []userRecord
+	if err := s.getJSON(ctx, path, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *SupabaseStore) insertUsers(ctx context.Context, payload []userRecord) ([]userRecord, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/rest/v1/app_users?select=id,email,plan,created_at,updated_at", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	s.applyHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", "return=representation")
+
+	res, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode >= http.StatusBadRequest {
+		return nil, fmt.Errorf("supabase insert users failed: status=%d body=%s", res.StatusCode, strings.TrimSpace(string(raw)))
+	}
+
+	var rows []userRecord
+	if err := json.Unmarshal(raw, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -288,4 +404,22 @@ func hydrateSession(row sessionRecord, messages []messageRecord) *models.Session
 	}
 
 	return current
+}
+
+func hydrateUser(row userRecord) *models.User {
+	return &models.User{
+		ID:        row.ID,
+		Email:     row.Email,
+		Plan:      row.Plan,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}
+}
+
+func hydrateAuthUser(row userRecord) *models.AuthUserRecord {
+	return &models.AuthUserRecord{
+		User:         *hydrateUser(row),
+		PasswordHash: row.PasswordHash,
+		PasswordSalt: row.PasswordSalt,
+	}
 }
