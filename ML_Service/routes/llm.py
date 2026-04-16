@@ -77,6 +77,7 @@ async def invoke_llm(request: LLMInvokeRequest) -> LLMInvokeResponse:
         result.response = full_text
         input_tokens = sum(result.input_tokens_used.values())
         output_tokens = _count_output_tokens(result.tier_reached, full_text)
+        total_tokens = input_tokens + output_tokens
         
         return LLMInvokeResponse(
             tier_number=result.tier_reached,
@@ -88,7 +89,7 @@ async def invoke_llm(request: LLMInvokeRequest) -> LLMInvokeResponse:
                 "model_cascade": {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
-                    "total_tokens": input_tokens + output_tokens,
+                    "total_tokens": total_tokens,
                 },
                 "attempts": [],
             },
@@ -140,6 +141,7 @@ async def simulate_from_prompt(request: LLMSimulateRequest) -> LLMSimulateRespon
                 full_text += chunk
         input_tokens = sum(result.input_tokens_used.values())
         output_tokens = _count_output_tokens(result.tier_reached, full_text)
+        total_tokens = input_tokens + output_tokens
         
         return LLMSimulateResponse(
             tier_number=result.tier_reached,

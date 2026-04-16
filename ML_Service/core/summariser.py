@@ -51,4 +51,5 @@ def summarize(messages: list[dict]) -> Tuple[str, int, int, int]:
     input_tokens = int(getattr(resp.usage, "prompt_tokens", 0) or 0)
     output_tokens = int(getattr(resp.usage, "completion_tokens", 0) or 0)
     tokens_saved = input_tokens - output_tokens
+
     return summary, max(tokens_saved, 0), input_tokens, output_tokens

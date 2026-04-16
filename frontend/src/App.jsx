@@ -120,6 +120,7 @@ export default function App() {
             />
             <Chat
               messages={messages}
+              lastTurn={lastTurn}
               isLoading={isLoading}
               onSend={sendMessage}
               theme={theme}

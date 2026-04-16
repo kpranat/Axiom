@@ -246,10 +246,9 @@ func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatRespo
 	}
 	current.Messages = append(current.Messages, assistantMessage)
 
-	optimizeTokens := toTokenIO(routeResponse.TokenBreakdown.OptimizePrompt)
 	cascadeTokens := toTokenIO(invokeResponse.TokenBreakdown.ModelCascade)
-	totalInput := summaryTokens.InputTokens + optimizeTokens.InputTokens + cascadeTokens.InputTokens
-	totalOutput := summaryTokens.OutputTokens + optimizeTokens.OutputTokens + cascadeTokens.OutputTokens
+	totalInput := summaryTokens.InputTokens + cascadeTokens.InputTokens
+	totalOutput := summaryTokens.OutputTokens + cascadeTokens.OutputTokens
 	totalTokens := totalInput + totalOutput
 	totalBreakdown := newTokenIO(totalInput, totalOutput)
 
@@ -290,7 +289,7 @@ func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatRespo
 		CacheHit:        false,
 		TokenBreakdown: ChatTokenBreakdown{
 			ContextSummary: summaryTokens,
-			OptimizePrompt: optimizeTokens,
+			OptimizePrompt: newTokenIO(0, 0),
 			ModelCascade:   cascadeTokens,
 			Total:          totalBreakdown,
 		},

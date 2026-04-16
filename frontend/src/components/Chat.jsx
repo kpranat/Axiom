@@ -11,15 +11,8 @@ import ThemeToggle from './ThemeToggle.jsx'
 import LogoDark from '../assets/LogoBlack.png'
 import LogoLight from '../assets/LogoLight.png'
 
-const MODEL_OPTIONS = [
-  { value: 'auto', label: 'Auto (Cascade)' },
-  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-  { value: 'gpt-4o', label: 'GPT-4o' },
-]
-
-export default function ChatPanel({ messages, isLoading, onSend, theme, onToggleTheme, isSidebarOpen, onToggleSidebar }) {
+export default function ChatPanel({ messages, lastTurn, isLoading, onSend, theme, onToggleTheme, isSidebarOpen, onToggleSidebar }) {
   const [input, setInput] = useState('')
-  const [model, setModel] = useState('auto')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
   const bottomRef = useRef(null)
@@ -70,6 +63,8 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
   }
 
   const hasMessages = messages.length > 0
+  const lastAiMessage = [...messages].reverse().find(msg => msg.role === 'ai')
+  const activeModel = formatModelLabel(lastTurn?.model_used || lastAiMessage?.model_used)
 
   return (
     <main
@@ -183,23 +178,25 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
 
           {/* Model Selector — per wireframe */}
           <div className="input-footer">
-            <label className="model-select-label" htmlFor="model-select">Model</label>
-            <select
-              id="model-select"
-              className="model-select-sk"
-              value={model}
-              onChange={e => setModel(e.target.value)}
-              aria-label="Select model"
-            >
-              {MODEL_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+            <span className="model-select-label">Model Used</span>
+            <span className="model-used-sk" aria-live="polite" aria-label={`Model used ${activeModel}`}>
+              {activeModel}
+            </span>
           </div>
         </div>
       </div>
     </main>
   )
+}
+
+function formatModelLabel(model) {
+  if (!model) return 'Auto (Cascade)'
+  if (model === 'gpt-3.5-turbo') return 'GPT-3.5 Turbo'
+  if (model === 'gpt-4o') return 'GPT-4o'
+  if (model === 'llama-3.1') return 'Llama 3.1'
+  if (model === 'llama-3.3') return 'Llama 3.3'
+  if (model === 'gemini-2.5-flash-lite') return 'Gemini 2.5 Flash Lite'
+  return model
 }
 
 const TIME_MESSAGES = {

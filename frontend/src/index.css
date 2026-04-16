@@ -589,6 +589,18 @@ body,
   color: var(--sk-model-hover-text);
 }
 
+.model-used-sk {
+  background: var(--sk-model-bg);
+  border: 1px solid var(--sk-model-border);
+  color: var(--sk-model-text);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 4px 10px;
+  box-shadow: var(--sk-model-shadow);
+}
+
 /* Live Token Usage Skeuomorphic */
 .metrics-panel-sk {
   background: var(--sk-metric-bg);
@@ -1210,6 +1222,10 @@ body,
 
 .model-select option {
   background: var(--bg-input);
+}
+
+.model-used-sk {
+  font-size: 11.5px;
 }
 
 /* Theme Toggle Skeuomorphic */
