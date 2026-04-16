@@ -71,21 +71,21 @@ def route(prompt: str, context: Optional[str] = None) -> RouteResult:
                 return RouteResult(
                     tier=tier,
                     score=0,
-                    reason=f"routerFunctionML selected {raw_label}",
+                    reason=f"[router=llama] routerFunctionML selected {raw_label}",
                 )
 
             fallback = legacy_route(prompt, context)
             return RouteResult(
                 tier=fallback.tier,
                 score=fallback.score,
-                reason=f"routerFunctionML parse fallback: {raw_label}; {fallback.reason}",
+                reason=f"[router=fallback-parse] routerFunctionML parse fallback: {raw_label}; {fallback.reason}",
             )
         except Exception as exc:  # pragma: no cover - runtime fallback
             fallback = legacy_route(prompt, context)
             return RouteResult(
                 tier=fallback.tier,
                 score=fallback.score,
-                reason=f"routerFunctionML runtime fallback: {exc}; {fallback.reason}",
+                reason=f"[router=fallback-runtime] routerFunctionML runtime fallback: {exc}; {fallback.reason}",
             )
 
     fallback = legacy_route(prompt, context)
@@ -95,5 +95,5 @@ def route(prompt: str, context: Optional[str] = None) -> RouteResult:
     return RouteResult(
         tier=fallback.tier,
         score=fallback.score,
-        reason=f"routerFunctionML load fallback: {_router_load_error}; {fallback.reason}",
+        reason=f"[router=fallback-load] routerFunctionML load fallback: {_router_load_error}; {fallback.reason}",
     )

@@ -18,7 +18,7 @@ No real API calls are made — every dispatch is logged to the terminal.
 from fastapi import APIRouter, HTTPException
 
 from core.gateway import run_cascade, build_billing_summary
-from core.tier_router import route as tier_route
+from core.router_adapter import route as tier_route
 from models.schemas import (
     LLMInvokeRequest,
     LLMInvokeResponse,
@@ -107,6 +107,8 @@ async def simulate_from_prompt(request: LLMSimulateRequest) -> LLMSimulateRespon
     """
     try:
         route_result = tier_route(request.prompt, request.context)
+        route_source = "llama" if route_result.reason.startswith("[router=llama]") else "fallback"
+        print(f"[ROUTER_DEBUG] source={route_source} tier={route_result.tier} reason={route_result.reason}")
 
         print("\n" + "-" * 60)
         print("[LLM_GATEWAY] Incoming prompt received")

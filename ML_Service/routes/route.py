@@ -14,7 +14,7 @@ The caller is responsible for forwarding prompt_to_send to the appropriate LLM.
 
 from fastapi import APIRouter, HTTPException
 
-from core.tier_router import route as tier_route
+from core.router_adapter import route as tier_route
 from models.schemas import RouteRequest, RouteResponse
 
 router = APIRouter(tags=["Router"])
@@ -56,6 +56,8 @@ async def route_prompt(request: RouteRequest) -> RouteResponse:
 
         # ── 1. Route tier using raw prompt (+ context signal if present) ─────
         route_result = tier_route(raw_prompt, active_context)
+        route_source = "llama" if route_result.reason.startswith("[router=llama]") else "fallback"
+        print(f"[ROUTER_DEBUG] source={route_source} tier={route_result.tier} reason={route_result.reason}")
 
         # ── 2. Build final prompt by combining raw prompt + context ──────────
         if active_context:
