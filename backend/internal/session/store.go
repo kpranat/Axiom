@@ -1,15 +1,12 @@
 package session
 
 import (
-	"errors"
 	"slices"
 	"sync"
 	"time"
 
 	"axiom/backend/internal/models"
 )
-
-var ErrSessionNotFound = errors.New("session not found")
 
 type Store struct {
 	mu       sync.RWMutex
@@ -34,7 +31,7 @@ func (s *Store) Create(userID string) *models.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[session.ID] = session
-	return cloneSession(session)
+	return CloneSession(session)
 }
 
 func (s *Store) Get(sessionID string) (*models.Session, error) {
@@ -46,7 +43,7 @@ func (s *Store) Get(sessionID string) (*models.Session, error) {
 		return nil, ErrSessionNotFound
 	}
 
-	return cloneSession(session), nil
+	return CloneSession(session), nil
 }
 
 func (s *Store) Update(session *models.Session) error {
@@ -58,7 +55,7 @@ func (s *Store) Update(session *models.Session) error {
 	}
 
 	session.UpdatedAt = time.Now().UTC()
-	s.sessions[session.ID] = cloneSession(session)
+	s.sessions[session.ID] = CloneSession(session)
 	return nil
 }
 
@@ -69,7 +66,7 @@ func (s *Store) ListByUser(userID string) ([]*models.Session, error) {
 	sessions := make([]*models.Session, 0)
 	for _, current := range s.sessions {
 		if current.UserID == userID {
-			sessions = append(sessions, cloneSession(current))
+			sessions = append(sessions, CloneSession(current))
 		}
 	}
 
@@ -87,12 +84,4 @@ func (s *Store) ListByUser(userID string) ([]*models.Session, error) {
 	return sessions, nil
 }
 
-func cloneSession(session *models.Session) *models.Session {
-	if session == nil {
-		return nil
-	}
 
-	cloned := *session
-	cloned.Messages = append([]models.Message(nil), session.Messages...)
-	return &cloned
-}
