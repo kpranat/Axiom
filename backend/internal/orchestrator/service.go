@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"axiom/backend/internal/auth"
 	"axiom/backend/internal/config"
 	"axiom/backend/internal/ml"
 	"axiom/backend/internal/models"
@@ -18,6 +19,9 @@ type SessionStore interface {
 	Get(sessionID string) (*models.Session, error)
 	Update(session *models.Session) error
 	ListByUser(userID string) ([]*models.Session, error)
+	CreateUser(email, passwordHash, passwordSalt, plan string) (*models.User, error)
+	GetUserByEmail(email string) (*models.AuthUserRecord, error)
+	GetUserByID(userID string) (*models.AuthUserRecord, error)
 }
 
 type MLClient interface {
@@ -35,6 +39,8 @@ type Service struct {
 	mlClient        MLClient
 	summaryInterval int
 	locker          *sessionLocker
+	jwtSecret       string
+	jwtTTL          time.Duration
 }
 
 type ChatResponse struct {
@@ -83,13 +89,93 @@ type SessionSummary struct {
 	TokensSaved  int       `json:"tokens_saved"`
 }
 
+type AuthResponse struct {
+	Token     string            `json:"token,omitempty"`
+	ExpiresAt time.Time         `json:"expires_at,omitempty"`
+	User      models.User       `json:"user"`
+	Chats     []*models.Session `json:"chats"`
+}
+
 func NewService(store SessionStore, mlClient MLClient, cfg config.Config) *Service {
 	return &Service{
 		store:           store,
 		mlClient:        mlClient,
 		summaryInterval: cfg.SummaryInterval,
 		locker:          newSessionLocker(),
+		jwtSecret:       cfg.JWTSecret,
+		jwtTTL:          time.Duration(cfg.JWTTTLHours) * time.Hour,
 	}
+}
+
+func (s *Service) Signup(ctx context.Context, email, password, plan string) (AuthResponse, error) {
+	email = auth.NormalizeEmail(email)
+	if email == "" {
+		return AuthResponse{}, errors.New("email is required")
+	}
+	if err := auth.ValidatePassword(password); err != nil {
+		return AuthResponse{}, err
+	}
+
+	passwordHash, passwordSalt, err := auth.HashPassword(password)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+
+	user, err := s.store.CreateUser(email, passwordHash, passwordSalt, auth.NormalizePlan(plan))
+	if err != nil {
+		if errors.Is(err, session.ErrUserAlreadyExists) {
+			return AuthResponse{}, auth.ErrUserExists
+		}
+		return AuthResponse{}, err
+	}
+
+	return s.buildAuthResponse(*user, true)
+}
+
+func (s *Service) Login(ctx context.Context, email, password string) (AuthResponse, error) {
+	email = auth.NormalizeEmail(email)
+	if email == "" || strings.TrimSpace(password) == "" {
+		return AuthResponse{}, auth.ErrInvalidCredentials
+	}
+
+	record, err := s.store.GetUserByEmail(email)
+	if err != nil {
+		if errors.Is(err, session.ErrUserNotFound) {
+			return AuthResponse{}, auth.ErrInvalidCredentials
+		}
+		return AuthResponse{}, err
+	}
+
+	if !auth.VerifyPassword(password, record.PasswordSalt, record.PasswordHash) {
+		return AuthResponse{}, auth.ErrInvalidCredentials
+	}
+
+	return s.buildAuthResponse(record.User, true)
+}
+
+func (s *Service) CurrentUser(token string) (AuthResponse, error) {
+	user, err := s.UserFromToken(token)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	return s.buildAuthResponse(*user, false)
+}
+
+func (s *Service) UserFromToken(token string) (*models.User, error) {
+	claims, err := auth.ParseJWT(s.jwtSecret, token, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+
+	record, err := s.store.GetUserByID(claims.Subject)
+	if err != nil {
+		if errors.Is(err, session.ErrUserNotFound) {
+			return nil, auth.ErrUnauthorized
+		}
+		return nil, err
+	}
+
+	return &record.User, nil
 }
 
 func (s *Service) CreateSession(ctx context.Context, userID string) (*models.Session, error) {
@@ -106,6 +192,14 @@ func (s *Service) GetMetrics(sessionID string) (models.SessionMetrics, error) {
 
 func (s *Service) GetSession(sessionID string) (*models.Session, error) {
 	return s.store.Get(sessionID)
+}
+
+func (s *Service) UserOwnsSession(userID, sessionID string) (bool, error) {
+	current, err := s.store.Get(sessionID)
+	if err != nil {
+		return false, err
+	}
+	return current.UserID == userID, nil
 }
 
 func (s *Service) ListUserSessions(userID string) ([]SessionSummary, error) {
@@ -135,6 +229,24 @@ func (s *Service) ListUserSessions(userID string) ([]SessionSummary, error) {
 	}
 
 	return result, nil
+}
+
+func (s *Service) ListUserChats(userID string) ([]*models.Session, error) {
+	sessions, err := s.store.ListByUser(strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+
+	chats := make([]*models.Session, 0, len(sessions))
+	for _, current := range sessions {
+		detailed, err := s.store.Get(current.ID)
+		if err != nil {
+			return nil, err
+		}
+		chats = append(chats, detailed)
+	}
+
+	return chats, nil
 }
 
 func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatResponse, error) {
@@ -421,4 +533,41 @@ func emptyBreakdown() ChatTokenBreakdown {
 
 func IsSessionNotFound(err error) bool {
 	return errors.Is(err, session.ErrSessionNotFound)
+}
+
+func IsUnauthorized(err error) bool {
+	return errors.Is(err, auth.ErrUnauthorized) || errors.Is(err, auth.ErrInvalidToken) || errors.Is(err, auth.ErrExpiredToken)
+}
+
+func IsInvalidCredentials(err error) bool {
+	return errors.Is(err, auth.ErrInvalidCredentials)
+}
+
+func IsUserExists(err error) bool {
+	return errors.Is(err, auth.ErrUserExists)
+}
+
+func (s *Service) buildAuthResponse(user models.User, includeToken bool) (AuthResponse, error) {
+	chats, err := s.ListUserChats(user.ID)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+
+	response := AuthResponse{
+		User:  user,
+		Chats: chats,
+	}
+
+	if includeToken {
+		now := time.Now().UTC()
+		claims := auth.NewClaims(user.ID, user.Email, user.Plan, s.jwtTTL, now)
+		token, err := auth.SignJWT(s.jwtSecret, claims)
+		if err != nil {
+			return AuthResponse{}, err
+		}
+		response.Token = token
+		response.ExpiresAt = now.Add(s.jwtTTL)
+	}
+
+	return response, nil
 }

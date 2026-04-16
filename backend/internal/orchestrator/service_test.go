@@ -2,11 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
+	"axiom/backend/internal/auth"
 	"axiom/backend/internal/config"
 	"axiom/backend/internal/ml"
 	"axiom/backend/internal/models"
@@ -16,10 +18,14 @@ import (
 type fakeStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*models.Session
+	users    map[string]*models.AuthUserRecord
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{sessions: make(map[string]*models.Session)}
+	return &fakeStore{
+		sessions: make(map[string]*models.Session),
+		users:    make(map[string]*models.AuthUserRecord),
+	}
 }
 
 func (s *fakeStore) Create(userID string) (*models.Session, error) {
@@ -85,6 +91,59 @@ func (s *fakeStore) ListByUser(userID string) ([]*models.Session, error) {
 	})
 
 	return sessions, nil
+}
+
+func (s *fakeStore) CreateUser(email, passwordHash, passwordSalt, plan string) (*models.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, current := range s.users {
+		if current.Email == email {
+			return nil, session.ErrUserAlreadyExists
+		}
+	}
+
+	now := time.Now().UTC()
+	record := &models.AuthUserRecord{
+		User: models.User{
+			ID:        session.NewID(),
+			Email:     email,
+			Plan:      plan,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		PasswordHash: passwordHash,
+		PasswordSalt: passwordSalt,
+	}
+	s.users[record.ID] = record
+	return &record.User, nil
+}
+
+func (s *fakeStore) GetUserByEmail(email string) (*models.AuthUserRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, current := range s.users {
+		if current.Email == email {
+			cloned := *current
+			return &cloned, nil
+		}
+	}
+
+	return nil, session.ErrUserNotFound
+}
+
+func (s *fakeStore) GetUserByID(userID string) (*models.AuthUserRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, ok := s.users[userID]
+	if !ok {
+		return nil, session.ErrUserNotFound
+	}
+
+	cloned := *current
+	return &cloned, nil
 }
 
 type stubMLClient struct {
@@ -392,5 +451,96 @@ func TestChatSkipsSummaryWhenContextNotNeeded(t *testing.T) {
 
 	if client.lastRoute.Context != "" {
 		t.Fatalf("expected empty route context when context is not needed, got %q", client.lastRoute.Context)
+	}
+}
+
+func TestSignupReturnsJWTAndFreePlanByDefault(t *testing.T) {
+	store := newFakeStore()
+	client := &stubMLClient{}
+	service := NewService(store, client, config.Config{SummaryInterval: 5, JWTSecret: "test-secret", JWTTTLHours: 24})
+
+	response, err := service.Signup(context.Background(), "user@example.com", "password123", "")
+	if err != nil {
+		t.Fatalf("signup failed: %v", err)
+	}
+
+	if response.Token == "" {
+		t.Fatalf("expected token to be returned")
+	}
+	if response.User.Plan != "free" {
+		t.Fatalf("expected default free plan, got %q", response.User.Plan)
+	}
+	if len(response.Chats) != 0 {
+		t.Fatalf("expected no chats for new user")
+	}
+}
+
+func TestLoginReturnsExistingChats(t *testing.T) {
+	store := newFakeStore()
+	client := &stubMLClient{}
+	service := NewService(store, client, config.Config{SummaryInterval: 5, JWTSecret: "test-secret", JWTTTLHours: 24})
+
+	signup, err := service.Signup(context.Background(), "login@example.com", "password123", "pro")
+	if err != nil {
+		t.Fatalf("signup failed: %v", err)
+	}
+
+	current, err := store.Create(signup.User.ID)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	current.Messages = []models.Message{{Role: "user", Content: "old chat"}}
+	if err := store.Update(current); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	login, err := service.Login(context.Background(), "login@example.com", "password123")
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	if login.User.Plan != "pro" {
+		t.Fatalf("expected pro plan, got %q", login.User.Plan)
+	}
+	if len(login.Chats) != 1 {
+		t.Fatalf("expected one previous chat, got %d", len(login.Chats))
+	}
+	if login.Chats[0].Messages[0].Content != "old chat" {
+		t.Fatalf("expected previous chat content to round-trip")
+	}
+}
+
+func TestLoginRejectsWrongPassword(t *testing.T) {
+	store := newFakeStore()
+	client := &stubMLClient{}
+	service := NewService(store, client, config.Config{SummaryInterval: 5, JWTSecret: "test-secret", JWTTTLHours: 24})
+
+	if _, err := service.Signup(context.Background(), "reject@example.com", "password123", ""); err != nil {
+		t.Fatalf("signup failed: %v", err)
+	}
+
+	_, err := service.Login(context.Background(), "reject@example.com", "wrongpass")
+	if !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("expected invalid credentials, got %v", err)
+	}
+}
+
+func TestCurrentUserParsesJWT(t *testing.T) {
+	store := newFakeStore()
+	client := &stubMLClient{}
+	service := NewService(store, client, config.Config{SummaryInterval: 5, JWTSecret: "test-secret", JWTTTLHours: 24})
+
+	signup, err := service.Signup(context.Background(), "me@example.com", "password123", "")
+	if err != nil {
+		t.Fatalf("signup failed: %v", err)
+	}
+
+	current, err := service.CurrentUser(signup.Token)
+	if err != nil {
+		t.Fatalf("current user failed: %v", err)
+	}
+
+	if current.User.Email != "me@example.com" {
+		t.Fatalf("expected email to match token user")
 	}
 }

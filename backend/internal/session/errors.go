@@ -6,7 +6,11 @@ import (
 	"axiom/backend/internal/models"
 )
 
-var ErrSessionNotFound = errors.New("session not found")
+var (
+	ErrSessionNotFound   = errors.New("session not found")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrUserAlreadyExists = errors.New("user already exists")
+)
 
 func CloneSession(session *models.Session) *models.Session {
 	if session == nil {

@@ -131,6 +131,8 @@ func isAPIPath(requestPath string) bool {
 	switch {
 	case requestPath == "/api", strings.HasPrefix(requestPath, "/api/"):
 		return true
+	case strings.HasPrefix(requestPath, "/auth/"):
+		return true
 	case requestPath == "/health", requestPath == "/session", requestPath == "/chat":
 		return true
 	case strings.HasPrefix(requestPath, "/sessions/"), strings.HasPrefix(requestPath, "/metrics/"), strings.HasPrefix(requestPath, "/users/"):

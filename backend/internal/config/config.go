@@ -17,6 +17,8 @@ type Config struct {
 	RequestTimeout   time.Duration
 	SupabaseURL      string
 	SupabaseKey      string
+	JWTSecret        string
+	JWTTTLHours      int
 }
 
 func Load() Config {
@@ -29,6 +31,8 @@ func Load() Config {
 		RequestTimeout:   time.Duration(getEnvInt("AXIOM_REQUEST_TIMEOUT_SECONDS", 30)) * time.Second,
 		SupabaseURL:      getEnv("SUPABASE_URL", ""),
 		SupabaseKey:      getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
+		JWTSecret:        getEnv("AXIOM_JWT_SECRET", ""),
+		JWTTTLHours:      getEnvInt("AXIOM_JWT_TTL_HOURS", 168),
 	}
 }
 
@@ -38,6 +42,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.SupabaseKey) == "" {
 		return errors.New("SUPABASE_SERVICE_ROLE_KEY is required")
+	}
+	if strings.TrimSpace(c.JWTSecret) == "" {
+		return errors.New("AXIOM_JWT_SECRET is required")
 	}
 	return nil
 }
