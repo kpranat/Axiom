@@ -18,7 +18,7 @@ No real API calls are made — every dispatch is logged to the terminal.
 from fastapi import APIRouter, HTTPException
 
 from core.llm_dispatcher import dispatch
-from core.tier_router import route as tier_route
+from core.router_adapter import route as tier_route
 from models.schemas import (
     LLMInvokeRequest,
     LLMInvokeResponse,
