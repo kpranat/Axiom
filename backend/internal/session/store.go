@@ -31,7 +31,7 @@ func (s *Store) Create(userID string) (*models.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[session.ID] = session
-	return cloneSession(session)
+	return cloneSession(session), nil
 }
 
 func (s *Store) Get(sessionID string) (*models.Session, error) {
@@ -43,7 +43,7 @@ func (s *Store) Get(sessionID string) (*models.Session, error) {
 		return nil, ErrSessionNotFound
 	}
 
-	return CloneSession(session), nil
+	return cloneSession(session), nil
 }
 
 func (s *Store) Update(session *models.Session) error {
@@ -55,7 +55,7 @@ func (s *Store) Update(session *models.Session) error {
 	}
 
 	session.UpdatedAt = time.Now().UTC()
-	s.sessions[session.ID] = CloneSession(session)
+	s.sessions[session.ID] = cloneSession(session)
 	return nil
 }
 
@@ -66,7 +66,7 @@ func (s *Store) ListByUser(userID string) ([]*models.Session, error) {
 	sessions := make([]*models.Session, 0)
 	for _, current := range s.sessions {
 		if current.UserID == userID {
-			sessions = append(sessions, CloneSession(current))
+			sessions = append(sessions, cloneSession(current))
 		}
 	}
 
