@@ -8,7 +8,8 @@ import { useRef, useEffect, useState } from 'react'
 import { motion, useAnimationControls } from 'framer-motion'
 import Message from './Message.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
-import Logo from '../assets/Adobe Express - file.png'
+import LogoDark from '../assets/LogoBlack.png'
+import LogoLight from '../assets/LogoLight.png'
 
 const MODEL_OPTIONS = [
   { value: 'auto', label: 'Auto (Cascade)' },
@@ -19,12 +20,27 @@ const MODEL_OPTIONS = [
 export default function ChatPanel({ messages, isLoading, onSend, theme, onToggleTheme, isSidebarOpen, onToggleSidebar }) {
   const [input, setInput] = useState('')
   const [model, setModel] = useState('auto')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isAnimating, setIsAnimating] = useState(false)
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
+
+  /* Clear local submission lock when parent loading state finishes */
+  useEffect(() => {
+    if (!isLoading) {
+      setIsSubmitting(false)
+    }
+  }, [isLoading])
 
   /* Auto-scroll to bottom on new messages */
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+
+    // If the last message is from AI, we are animating the reveal
+    const lastMsg = messages[messages.length - 1]
+    if (lastMsg && lastMsg.role === 'ai') {
+      setIsAnimating(true)
+    }
   }, [messages, isLoading])
 
   /* Auto-resize textarea */
@@ -38,13 +54,16 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      submit()
+      if (!isLoading && !isSubmitting && !isAnimating) {
+        submit()
+      }
     }
   }
 
   function submit() {
     const trimmed = input.trim()
-    if (!trimmed || isLoading) return
+    if (!trimmed || isLoading || isSubmitting || isAnimating) return
+    setIsSubmitting(true)
     onSend(trimmed)
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
@@ -53,20 +72,32 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
   const hasMessages = messages.length > 0
 
   return (
-    <main className={`chat-panel ${!hasMessages ? 'empty-state' : ''}`} role="main">
+    <main
+      className={`chat-panel ${!hasMessages ? 'empty-state' : ''}`}
+      role="main"
+    >
       {/* Top bar */}
       <div className="chat-topbar">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       </div>
 
       {/* Messages */}
-      <div className="messages-area" role="log" aria-live="polite" aria-label="Chat messages">
+      <div
+        className="messages-area"
+        role="log"
+        aria-live="polite"
+        aria-label="Chat messages"
+      >
         {!hasMessages ? (
-          <Welcome />
+          <Welcome theme={theme} />
         ) : (
           <>
-            {messages.map(msg => (
-              <Message key={msg.id} message={msg} />
+            {messages.map((msg, i) => (
+              <Message
+                key={msg.id}
+                message={msg}
+                onAnimationComplete={i === messages.length - 1 ? () => setIsAnimating(false) : undefined}
+              />
             ))}
             {isLoading && (
               <div className="message-wrapper ai">
@@ -82,7 +113,7 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
 
       {/* Input Area */}
       <div className="input-area">
-        <div className="input-container">
+        <div className="input-container-sk">
           <div className="input-row">
             <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'flex-start' }}>
               {!input && !hasMessages && (
@@ -109,8 +140,8 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
                   aria-hidden="true"
                 >
                   {"What can I help you with?".split(' ').map((word, i) => (
-                    <motion.span 
-                      key={i} 
+                    <motion.span
+                      key={i}
                       variants={{
                         hidden: { opacity: 0, y: 6, filter: 'blur(2px)' },
                         visible: { opacity: 1, y: 0, filter: 'blur(0px)', transition: { duration: 0.4, ease: 'easeOut' } }
@@ -132,15 +163,14 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
                 onKeyDown={handleKeyDown}
                 rows={1}
                 aria-label="Chat input"
-                disabled={isLoading}
                 style={{ zIndex: 2, position: 'relative', width: '100%' }}
               />
             </div>
             <button
               id="btn-send"
-              className="send-btn"
+              className="send-btn-sk"
               onClick={submit}
-              disabled={!input.trim() || isLoading}
+              disabled={!input.trim() || isLoading || isSubmitting || isAnimating}
               aria-label="Send message"
               style={{ zIndex: 2 }}
             >
@@ -156,7 +186,7 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
             <label className="model-select-label" htmlFor="model-select">Model</label>
             <select
               id="model-select"
-              className="model-select"
+              className="model-select-sk"
               value={model}
               onChange={e => setModel(e.target.value)}
               aria-label="Select model"
@@ -216,7 +246,7 @@ function pickMessage(period) {
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
-function Welcome() {
+function Welcome({ theme }) {
   const [greeting] = useState(() => pickMessage(getTimePeriod()))
   const spinControls = useAnimationControls()
   const isSpinning = useRef(false)
@@ -224,21 +254,21 @@ function Welcome() {
   async function handleClick() {
     if (isSpinning.current) return
     isSpinning.current = true
-    
+
     await spinControls.start({
       scale: 0.95,
       rotate: 360,
       transition: { duration: 1.4, ease: 'easeInOut' }
     })
-    
+
     spinControls.set({ rotate: 0 })
-    
+
     // Scale back up cleanly
     await spinControls.start({
       scale: 1,
       transition: { duration: 0.4, ease: 'easeOut' }
     })
-    
+
     isSpinning.current = false
   }
 
@@ -258,11 +288,11 @@ function Welcome() {
 
   const wordVariants = {
     hidden: { opacity: 0, y: 10, filter: 'blur(4px)' },
-    visible: { 
-      opacity: 1, 
-      y: 0, 
+    visible: {
+      opacity: 1,
+      y: 0,
       filter: 'blur(0px)',
-      transition: { duration: 0.5, ease: 'easeOut' } 
+      transition: { duration: 0.5, ease: 'easeOut' }
     }
   }
 
@@ -275,9 +305,16 @@ function Welcome() {
         style={{ display: 'flex' }}
       >
         <motion.img
-          src={Logo}
+          layoutId="axiom-hero-logo"
+          src={theme === 'dark' ? LogoDark : LogoLight}
           alt="Axiom Logo"
-          animate={spinControls}
+          initial={{ rotate: -360, scale: 0.8 }}
+          animate={{ rotate: 0, scale: 1 }}
+          transition={{ 
+            rotate: { duration: 2.8, ease: [0.16, 1, 0.3, 1] },
+            scale: { duration: 0.8, ease: 'easeOut' },
+            layout: { duration: 1.5, ease: [0.16, 1, 0.3, 1] }
+          }}
           onHoverStart={() => {
             if (isSpinning.current) return
             spinControls.start({

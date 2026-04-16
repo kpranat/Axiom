@@ -5,7 +5,7 @@
 
 import { motion } from 'framer-motion'
 
-export default function Message({ message }) {
+export default function Message({ message, onAnimationComplete }) {
   const isUser = message.role === 'user'
 
   const badgeInfo = getBadge(message)
@@ -27,6 +27,7 @@ export default function Message({ message }) {
         }}
         initial="hidden"
         animate="visible"
+        onAnimationComplete={onAnimationComplete}
         style={{ display: 'inline-block' }}
       >
         {words.map((word, i) => (
@@ -56,46 +57,15 @@ export default function Message({ message }) {
       </div>
 
       {!isUser && (
-        <>
-          <div className="message-meta">
-            {badgeInfo && (
-              <span className={`badge badge-${badgeInfo.type}`} aria-label={badgeInfo.label}>
-                {badgeInfo.icon} {badgeInfo.label}
-              </span>
-            )}
-            {timeStr && <span className="message-time">{timeStr}</span>}
-          </div>
-          <TokenBreakdown message={message} />
-        </>
-      )}
-    </div>
-  )
-}
-
-function TokenBreakdown({ message }) {
-  const breakdown = message.token_breakdown
-  if (!breakdown) return null
-
-  const rows = [
-    { label: 'Context Summary', value: breakdown.context_summary },
-    { label: 'Optimize Prompt', value: breakdown.optimize_prompt },
-    { label: 'Model Cascade', value: breakdown.model_cascade },
-    { label: 'Total', value: breakdown.total },
-  ].filter(row => row.value)
-
-  if (!rows.length) return null
-
-  const totalUsed = message.total_tokens_used ?? breakdown.total?.total_tokens ?? 0
-
-  return (
-    <div className="token-breakdown" aria-label="Token breakdown">
-      <div className="token-breakdown-title">Token Usage: {totalUsed}</div>
-      {rows.map(row => (
-        <div className="token-breakdown-row" key={row.label}>
-          <span>{row.label}</span>
-          <span>in {row.value.input_tokens || 0} / out {row.value.output_tokens || 0}</span>
+        <div className="message-meta">
+          {badgeInfo && (
+            <span className={`badge badge-${badgeInfo.type}`} aria-label={badgeInfo.label}>
+              {badgeInfo.icon} {badgeInfo.label}
+            </span>
+          )}
+          {timeStr && <span className="message-time">{timeStr}</span>}
         </div>
-      ))}
+      )}
     </div>
   )
 }
@@ -104,14 +74,11 @@ function getBadge(message) {
   if (message.cache_hit) {
     return { type: 'cache', label: 'Cache Hit', icon: '⚡' }
   }
-  if (!message.model_used) return null
-
-  if (message.model_used.includes('gemini') || message.model_used.includes('70b')) {
-    return { type: 'large', label: message.model_used, icon: '🔮' }
+  if (message.model_used === 'gpt-4o') {
+    return { type: 'large', label: 'GPT-4o', icon: '🔮' }
   }
-  if (message.model_used.includes('8b')) {
-    return { type: 'small', label: message.model_used, icon: '✦' }
+  if (message.model_used === 'gpt-3.5-turbo') {
+    return { type: 'small', label: 'GPT-3.5', icon: '✦' }
   }
-
-  return { type: 'small', label: message.model_used, icon: '✦' }
+  return null
 }
