@@ -109,8 +109,8 @@ func NewService(store SessionStore, mlClient MLClient, cfg config.Config) *Servi
 
 func (s *Service) Signup(ctx context.Context, email, password, plan string) (AuthResponse, error) {
 	email = auth.NormalizeEmail(email)
-	if email == "" {
-		return AuthResponse{}, errors.New("email is required")
+	if err := auth.ValidateEmail(email); err != nil {
+		return AuthResponse{}, err
 	}
 	if err := auth.ValidatePassword(password); err != nil {
 		return AuthResponse{}, err
@@ -167,7 +167,7 @@ func (s *Service) UserFromToken(token string) (*models.User, error) {
 		return nil, err
 	}
 
-	record, err := s.store.GetUserByID(claims.Subject)
+	record, err := s.store.GetUserByID(claims.UserID)
 	if err != nil {
 		if errors.Is(err, session.ErrUserNotFound) {
 			return nil, auth.ErrUnauthorized
@@ -548,14 +548,9 @@ func IsUserExists(err error) bool {
 }
 
 func (s *Service) buildAuthResponse(user models.User, includeToken bool) (AuthResponse, error) {
-	chats, err := s.ListUserChats(user.ID)
-	if err != nil {
-		return AuthResponse{}, err
-	}
-
 	response := AuthResponse{
 		User:  user,
-		Chats: chats,
+		Chats: []*models.Session{},
 	}
 
 	if includeToken {

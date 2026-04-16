@@ -121,11 +121,39 @@ function getBadge(message) {
   if (message.cache_hit) {
     return { type: 'cache', label: 'Cache Hit', icon: '⚡' }
   }
-  if (message.model_used === 'gpt-4o') {
-    return { type: 'large', label: 'GPT-4o', icon: '🔮' }
-  }
-  if (message.model_used === 'gpt-3.5-turbo') {
-    return { type: 'small', label: 'GPT-3.5', icon: '✦' }
+  if (message.model_used) {
+    return {
+      type: 'model',
+      label: formatModelName(message.model_used),
+      icon: '🤖',
+    }
   }
   return null
+}
+
+function formatModelName(model) {
+  const cleaned = String(model || '').trim()
+  if (!cleaned) {
+    return 'Unknown Model'
+  }
+
+  const friendlyNames = {
+    'semantic-cache': 'Semantic Cache',
+    'llama-3.1-8b-instant': 'Llama 3.1 8B Instant',
+    'llama-3.3-70b-versatile': 'Llama 3.3 70B Versatile',
+    'gemini-2.5-flash': 'Gemini 2.5 Flash',
+    'gpt-3.5-turbo': 'GPT-3.5 Turbo',
+    'gpt-4o': 'GPT-4o',
+    'offline-mock': 'Offline Mock',
+  }
+
+  if (friendlyNames[cleaned]) {
+    return friendlyNames[cleaned]
+  }
+
+  return cleaned
+    .split(/[-_/\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 }

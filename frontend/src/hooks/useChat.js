@@ -57,7 +57,7 @@ export function useChat() {
   }
 
   const sendMessage = useCallback(async (prompt) => {
-    if (!prompt.trim() || isLoading) return
+    if (!sessionId || !prompt.trim() || isLoading) return
     setError(null)
 
     const userMsg = { id: Date.now(), role: 'user', content: prompt }
@@ -83,7 +83,7 @@ export function useChat() {
         id: Date.now() + 1,
         role: 'ai',
         content: `[Backend offline — mock response] You asked: "${prompt}"`,
-        model_used: 'gpt-3.5-turbo',
+        model_used: 'offline-mock',
         tokens_used: 42,
         tokens_saved: 0,
         cache_hit: false,
