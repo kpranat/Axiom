@@ -941,6 +941,38 @@ body,
   box-shadow: var(--shadow-sm);
 }
 
+.message-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-code {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.04);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.message-code code {
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+[data-theme="dark"] .message-code {
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .message-wrapper.user .message-bubble {
   background: var(--bg-user-msg);
   color: var(--text-user-msg);

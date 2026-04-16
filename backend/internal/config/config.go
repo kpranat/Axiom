@@ -87,10 +87,30 @@ func dotEnvPaths() []string {
 		return []string{".env"}
 	}
 
-	return []string{
-		filepath.Join(cwd, ".env"),
-		filepath.Join(cwd, "backend", ".env"),
+	paths := make([]string, 0, 12)
+	seen := make(map[string]struct{})
+	addPath := func(path string) {
+		path = filepath.Clean(path)
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
 	}
+
+	current := cwd
+	for {
+		addPath(filepath.Join(current, ".env"))
+		addPath(filepath.Join(current, "backend", ".env"))
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+
+	return paths
 }
 
 func loadDotEnvFile(path string) error {

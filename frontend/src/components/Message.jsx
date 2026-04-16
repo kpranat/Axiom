@@ -7,6 +7,7 @@ import { motion } from 'framer-motion'
 
 export default function Message({ message, onAnimationComplete }) {
   const isUser = message.role === 'user'
+  const content = normalizeContent(message.content)
 
   const badgeInfo = getBadge(message)
   const timeStr = message.timestamp
@@ -14,38 +15,31 @@ export default function Message({ message, onAnimationComplete }) {
     : null
 
   const renderAiContent = () => {
-    const words = message.content.split(' ')
+    const segments = splitByCodeFence(content)
 
     return (
       <motion.div
-        variants={{
-          hidden: { opacity: 1 },
-          visible: {
-            opacity: 1,
-            transition: { staggerChildren: 0.08 }
-          }
-        }}
-        initial="hidden"
-        animate="visible"
+        className="message-content"
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.22, ease: 'easeOut' }}
         onAnimationComplete={onAnimationComplete}
-        style={{ display: 'inline-block' }}
       >
-        {words.map((word, i) => (
-          <motion.span
-            key={i}
-            variants={{
-              hidden: { opacity: 0, y: 4 },
-              visible: { 
-                opacity: 1, 
-                y: 0, 
-                transition: { duration: 0.3, ease: 'easeOut' }
-              }
-            }}
-            style={{ display: 'inline-block', whiteSpace: 'pre-wrap' }}
-          >
-            {word + (i < words.length - 1 ? ' ' : '')}
-          </motion.span>
-        ))}
+        {segments.map((segment, index) => {
+          if (segment.type === 'code') {
+            return (
+              <pre key={index} className="message-code">
+                <code>{segment.value}</code>
+              </pre>
+            )
+          }
+
+          return (
+            <p key={index} className="message-text">
+              {segment.value}
+            </p>
+          )
+        })}
       </motion.div>
     )
   }
@@ -53,7 +47,7 @@ export default function Message({ message, onAnimationComplete }) {
   return (
     <div className={`message-wrapper ${isUser ? 'user' : 'ai'}`}>
       <div className="message-bubble">
-        {isUser ? message.content : renderAiContent()}
+        {isUser ? content : renderAiContent()}
       </div>
 
       {!isUser && (
@@ -68,6 +62,59 @@ export default function Message({ message, onAnimationComplete }) {
       )}
     </div>
   )
+}
+
+function normalizeContent(value) {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (value == null) {
+    return ''
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
+function splitByCodeFence(content) {
+  const result = []
+  const regex = /```(?:[a-zA-Z0-9_+-]+)?\n?([\s\S]*?)```/g
+  let cursor = 0
+  let match = regex.exec(content)
+
+  while (match) {
+    const codeStart = match.index
+    const codeEnd = regex.lastIndex
+
+    if (codeStart > cursor) {
+      const textChunk = content.slice(cursor, codeStart)
+      if (textChunk.trim() !== '') {
+        result.push({ type: 'text', value: textChunk })
+      }
+    }
+
+    result.push({ type: 'code', value: match[1].replace(/\n$/, '') })
+    cursor = codeEnd
+    match = regex.exec(content)
+  }
+
+  if (cursor < content.length) {
+    const trailingText = content.slice(cursor)
+    if (trailingText.trim() !== '') {
+      result.push({ type: 'text', value: trailingText })
+    }
+  }
+
+  if (result.length === 0) {
+    return [{ type: 'text', value: content }]
+  }
+
+  return result
 }
 
 function getBadge(message) {
