@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"axiom/backend/internal/auth"
-	"axiom/backend/internal/config"
 	"axiom/backend/internal/models"
 	"axiom/backend/internal/orchestrator"
+	"axiom/backend/middleware"
 )
 
 type Service interface {
@@ -27,8 +27,7 @@ type Service interface {
 }
 
 type Handler struct {
-	service     Service
-	rateLimiter *rateLimiter
+	service Service
 }
 
 type createSessionResponse struct {
@@ -50,30 +49,30 @@ type authRequest struct {
 	Plan     string `json:"plan,omitempty"`
 }
 
-func NewHandler(service Service, cfg config.Config) *Handler {
-	return &Handler{
-		service:     service,
-		rateLimiter: newRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow),
-	}
+func NewHandler(service Service) *Handler {
+	return &Handler{service: service}
 }
 
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	h.registerRoutes(mux, "")
 	h.registerRoutes(mux, "/api")
-	return withCORS(h.withRateLimit(mux))
+	return withCORS(mux)
 }
 
 func (h *Handler) registerRoutes(mux *http.ServeMux, prefix string) {
+	protected := middleware.AuthMiddleware(h.jwtSecret)
+
 	mux.HandleFunc(prefix+"/health", h.handleHealth)
-	mux.HandleFunc(prefix+"/auth/signup", h.handleSignup)
-	mux.HandleFunc(prefix+"/auth/login", h.handleLogin)
-	mux.HandleFunc(prefix+"/auth/me", h.handleMe)
-	mux.HandleFunc(prefix+"/session", h.handleSession)
-	mux.HandleFunc(prefix+"/sessions/", h.handleSessionByID)
-	mux.HandleFunc(prefix+"/chat", h.handleChat)
-	mux.HandleFunc(prefix+"/metrics/", h.handleMetrics)
-	mux.HandleFunc(prefix+"/users/", h.handleUsers)
+	mux.HandleFunc(prefix+"/auth/signup", h.authHandler.Signup)
+	mux.HandleFunc(prefix+"/auth/login", h.authHandler.Login)
+	mux.HandleFunc(prefix+"/auth/me", h.authHandler.Me)
+	mux.HandleFunc(prefix+"/auth/logout", h.authHandler.Logout)
+	mux.Handle(prefix+"/session", protected(http.HandlerFunc(h.handleSession)))
+	mux.Handle(prefix+"/sessions/", protected(http.HandlerFunc(h.handleSessionByID)))
+	mux.Handle(prefix+"/chat", protected(http.HandlerFunc(h.handleChat)))
+	mux.Handle(prefix+"/metrics/", protected(http.HandlerFunc(h.handleMetrics)))
+	mux.Handle(prefix+"/users/", protected(http.HandlerFunc(h.handleUsers)))
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -197,10 +196,12 @@ func (h *Handler) handleSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	authUser, _ := h.optionalUser(r)
-	if authUser != nil {
-		payload.UserID = authUser.ID
+	identity, ok := middleware.IdentityFromContext(r.Context())
+	if !ok || strings.TrimSpace(identity.UserID) == "" {
+		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
+		return
 	}
+	payload.UserID = identity.UserID
 
 	session, err := h.service.CreateSession(r.Context(), payload.UserID)
 	if err != nil {
@@ -231,23 +232,24 @@ func (h *Handler) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if authUser, err := h.optionalUser(r); err != nil {
-		writeError(w, http.StatusUnauthorized, err)
+	identity, ok := middleware.IdentityFromContext(r.Context())
+	if !ok || strings.TrimSpace(identity.UserID) == "" {
+		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
 		return
-	} else if authUser != nil {
-		owned, ownErr := h.service.UserOwnsSession(authUser.ID, sessionID)
-		if ownErr != nil {
-			if orchestrator.IsSessionNotFound(ownErr) {
-				writeError(w, http.StatusNotFound, ownErr)
-				return
-			}
-			writeError(w, http.StatusInternalServerError, ownErr)
+	}
+
+	owned, ownErr := h.service.UserOwnsSession(identity.UserID, sessionID)
+	if ownErr != nil {
+		if orchestrator.IsSessionNotFound(ownErr) {
+			writeError(w, http.StatusNotFound, ownErr)
 			return
 		}
-		if !owned {
-			writeError(w, http.StatusForbidden, errors.New("forbidden"))
-			return
-		}
+		writeError(w, http.StatusInternalServerError, ownErr)
+		return
+	}
+	if !owned {
+		writeError(w, http.StatusForbidden, errors.New("forbidden"))
+		return
 	}
 
 	current, err := h.service.GetSession(sessionID)
@@ -279,23 +281,24 @@ func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if authUser, err := h.optionalUser(r); err != nil {
-		writeError(w, http.StatusUnauthorized, err)
+	identity, ok := middleware.IdentityFromContext(r.Context())
+	if !ok || strings.TrimSpace(identity.UserID) == "" {
+		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
 		return
-	} else if authUser != nil {
-		owned, ownErr := h.service.UserOwnsSession(authUser.ID, payload.SessionID)
-		if ownErr != nil {
-			if orchestrator.IsSessionNotFound(ownErr) {
-				writeError(w, http.StatusNotFound, ownErr)
-				return
-			}
-			writeError(w, http.StatusInternalServerError, ownErr)
+	}
+
+	owned, ownErr := h.service.UserOwnsSession(identity.UserID, payload.SessionID)
+	if ownErr != nil {
+		if orchestrator.IsSessionNotFound(ownErr) {
+			writeError(w, http.StatusNotFound, ownErr)
 			return
 		}
-		if !owned {
-			writeError(w, http.StatusForbidden, errors.New("forbidden"))
-			return
-		}
+		writeError(w, http.StatusInternalServerError, ownErr)
+		return
+	}
+	if !owned {
+		writeError(w, http.StatusForbidden, errors.New("forbidden"))
+		return
 	}
 
 	response, err := h.service.Chat(r.Context(), payload.SessionID, payload.Prompt)
@@ -334,23 +337,24 @@ func (h *Handler) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if authUser, err := h.optionalUser(r); err != nil {
-		writeError(w, http.StatusUnauthorized, err)
+	identity, ok := middleware.IdentityFromContext(r.Context())
+	if !ok || strings.TrimSpace(identity.UserID) == "" {
+		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
 		return
-	} else if authUser != nil {
-		owned, ownErr := h.service.UserOwnsSession(authUser.ID, sessionID)
-		if ownErr != nil {
-			if orchestrator.IsSessionNotFound(ownErr) {
-				writeError(w, http.StatusNotFound, ownErr)
-				return
-			}
-			writeError(w, http.StatusInternalServerError, ownErr)
+	}
+
+	owned, ownErr := h.service.UserOwnsSession(identity.UserID, sessionID)
+	if ownErr != nil {
+		if orchestrator.IsSessionNotFound(ownErr) {
+			writeError(w, http.StatusNotFound, ownErr)
 			return
 		}
-		if !owned {
-			writeError(w, http.StatusForbidden, errors.New("forbidden"))
-			return
-		}
+		writeError(w, http.StatusInternalServerError, ownErr)
+		return
+	}
+	if !owned {
+		writeError(w, http.StatusForbidden, errors.New("forbidden"))
+		return
 	}
 
 	metrics, err := h.service.GetMetrics(sessionID)
@@ -386,10 +390,12 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if authUser, err := h.optionalUser(r); err != nil {
-		writeError(w, http.StatusUnauthorized, err)
+	identity, ok := middleware.IdentityFromContext(r.Context())
+	if !ok || strings.TrimSpace(identity.UserID) == "" {
+		writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
 		return
-	} else if authUser != nil && authUser.ID != parts[0] {
+	}
+	if identity.UserID != parts[0] {
 		writeError(w, http.StatusForbidden, errors.New("forbidden"))
 		return
 	}
@@ -417,11 +423,12 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func withCORS(next http.Handler) http.Handler {
+func (h *Handler) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Origin", h.frontendOrigin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Vary", "Origin")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

@@ -11,15 +11,8 @@ import ThemeToggle from './ThemeToggle.jsx'
 import LogoDark from '../assets/LogoBlack.png'
 import LogoLight from '../assets/LogoLight.png'
 
-const MODEL_OPTIONS = [
-  { value: 'auto', label: 'Auto (Cascade)' },
-  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-  { value: 'gpt-4o', label: 'GPT-4o' },
-]
-
 export default function ChatPanel({ messages, isLoading, onSend, theme, onToggleTheme, isSidebarOpen, onToggleSidebar }) {
   const [input, setInput] = useState('')
-  const [model, setModel] = useState('auto')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
   const bottomRef = useRef(null)
@@ -181,21 +174,6 @@ export default function ChatPanel({ messages, isLoading, onSend, theme, onToggle
             </button>
           </div>
 
-          {/* Model Selector — per wireframe */}
-          <div className="input-footer">
-            <label className="model-select-label" htmlFor="model-select">Model</label>
-            <select
-              id="model-select"
-              className="model-select-sk"
-              value={model}
-              onChange={e => setModel(e.target.value)}
-              aria-label="Select model"
-            >
-              {MODEL_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
         </div>
       </div>
     </main>

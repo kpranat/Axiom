@@ -11,32 +11,28 @@ import (
 )
 
 type Config struct {
-	HTTPAddr          string
-	MLServiceBaseURL  string
-	SummaryInterval   int
-	RequestTimeout    time.Duration
-	SupabaseURL       string
-	SupabaseKey       string
-	JWTSecret         string
-	JWTTTLHours       int
-	RateLimitRequests int
-	RateLimitWindow   time.Duration
+	HTTPAddr         string
+	MLServiceBaseURL string
+	SummaryInterval  int
+	RequestTimeout   time.Duration
+	SupabaseURL      string
+	SupabaseKey      string
+	JWTSecret        string
+	JWTTTLHours      int
 }
 
 func Load() Config {
 	loadDotEnv()
 
 	return Config{
-		HTTPAddr:          getHTTPAddr(),
-		MLServiceBaseURL:  getEnv("AXIOM_ML_SERVICE_URL", "http://127.0.0.1:8000"),
-		SummaryInterval:   getEnvInt("AXIOM_SUMMARY_INTERVAL", 5),
-		RequestTimeout:    time.Duration(getEnvInt("AXIOM_REQUEST_TIMEOUT_SECONDS", 30)) * time.Second,
-		SupabaseURL:       getEnv("SUPABASE_URL", ""),
-		SupabaseKey:       getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
-		JWTSecret:         getEnv("AXIOM_JWT_SECRET", ""),
-		JWTTTLHours:       getEnvInt("AXIOM_JWT_TTL_HOURS", 168),
-		RateLimitRequests: getEnvInt("AXIOM_RATE_LIMIT_REQUESTS", 60),
-		RateLimitWindow:   time.Duration(getEnvInt("AXIOM_RATE_LIMIT_WINDOW_SECONDS", 60)) * time.Second,
+		HTTPAddr:         getHTTPAddr(),
+		MLServiceBaseURL: getEnv("AXIOM_ML_SERVICE_URL", "http://127.0.0.1:8000"),
+		SummaryInterval:  getEnvInt("AXIOM_SUMMARY_INTERVAL", 5),
+		RequestTimeout:   time.Duration(getEnvInt("AXIOM_REQUEST_TIMEOUT_SECONDS", 30)) * time.Second,
+		SupabaseURL:      getEnv("SUPABASE_URL", ""),
+		SupabaseKey:      getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
+		JWTSecret:        getEnv("AXIOM_JWT_SECRET", ""),
+		JWTTTLHours:      getEnvInt("AXIOM_JWT_TTL_HOURS", 168),
 	}
 }
 
@@ -48,7 +44,7 @@ func (c Config) Validate() error {
 		return errors.New("SUPABASE_SERVICE_ROLE_KEY is required")
 	}
 	if strings.TrimSpace(c.JWTSecret) == "" {
-		return errors.New("AXIOM_JWT_SECRET is required")
+		return errors.New("JWT_SECRET is required")
 	}
 	if c.RateLimitRequests <= 0 {
 		return errors.New("AXIOM_RATE_LIMIT_REQUESTS must be greater than 0")

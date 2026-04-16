@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import MetricsSidebar from './components/MetricsSidebar.jsx'
 import Chat from './components/Chat.jsx'
 import { useChat } from './hooks/useChat.js'
+import { useAuth } from './context/AuthContext.jsx'
 import LogoDark from './assets/LogoBlack.png'
 import LogoLight from './assets/LogoLight.png'
 import BgDark from './assets/Bagrounddark.png'
@@ -43,6 +44,10 @@ export default function App() {
 
   function toggleTheme() {
     setTheme(t => (t === 'light' ? 'dark' : 'light'))
+  }
+
+  async function handleLogout() {
+    await logout()
   }
 
   return (
@@ -113,6 +118,8 @@ export default function App() {
               sessions={sessions}
               onNewChat={startNewChat}
               onLoadSession={loadSession}
+              user={user}
+              onLogout={handleLogout}
               isOpen={isSidebarOpen}
               onToggle={toggleSidebar}
               theme={theme}

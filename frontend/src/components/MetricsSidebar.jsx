@@ -6,7 +6,8 @@
  */
 
 import React, { useRef } from 'react'
-import { motion, AnimatePresence, useAnimationControls } from 'framer-motion'
+import { createPortal } from 'react-dom'
+import { motion, AnimatePresence } from 'framer-motion'
 import LogoDark from '../assets/LogoBlack.png'
 import LogoLight from '../assets/LogoLight.png'
 
@@ -20,11 +21,34 @@ const FADE_TRANSITION = { duration: 0.18, ease: 'easeOut' }
 export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoadSession, isOpen, onToggle, theme, isViewingHistory }) {
   const [searchQuery, setSearchQuery] = React.useState('')
   const [isAccountMenuOpen, setIsAccountMenuOpen] = React.useState(false)
+  const [menuRect, setMenuRect] = React.useState(null)
   const [rotationAngle, setRotationAngle] = React.useState(isOpen ? 360 : 0)
+  const sidebarRef = React.useRef(null)
   const accountRef = React.useRef(null)
+  const menuRef = React.useRef(null)
   const searchInputRef = React.useRef(null)
-  const logoControls = useAnimationControls()
   const prevOpen = useRef(isOpen)
+
+  const updateMenuPosition = React.useCallback(() => {
+    if (accountRef.current && sidebarRef.current) {
+      const btnRect = accountRef.current.getBoundingClientRect()
+      const sideRect = sidebarRef.current.getBoundingClientRect()
+      
+      let finalLeft = btnRect.left
+      let finalWidth = 220
+
+      if (sideRect.width >= 80) {
+        finalLeft = sideRect.left + 8
+        finalWidth = sideRect.width - 16
+      }
+
+      setMenuRect({
+        top: btnRect.top,
+        left: finalLeft,
+        width: finalWidth
+      })
+    }
+  }, [])
 
   React.useEffect(() => {
     if (prevOpen.current !== isOpen) {
@@ -32,6 +56,45 @@ export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoad
       setRotationAngle(prev => prev + 360)
     }
   }, [isOpen])
+
+  React.useEffect(() => {
+    if (!isAccountMenuOpen) return
+
+    function handleDocumentClick(event) {
+      const clickedOutsideAccount = accountRef.current && !accountRef.current.contains(event.target)
+      const clickedOutsideMenu = menuRef.current && !menuRef.current.contains(event.target)
+      
+      if (clickedOutsideAccount && clickedOutsideMenu) {
+        setIsAccountMenuOpen(false)
+      }
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        setIsAccountMenuOpen(false)
+      }
+    }
+    
+    function handleResize() {
+      updateMenuPosition()
+    }
+
+    document.addEventListener('mousedown', handleDocumentClick)
+    document.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('resize', handleResize)
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentClick)
+      document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [isAccountMenuOpen])
+
+  const toggleAccountMenu = () => {
+    if (!isAccountMenuOpen) {
+      updateMenuPosition()
+    }
+    setIsAccountMenuOpen(prev => !prev)
+  }
 
   /* 
      Search & History Logic:
@@ -78,6 +141,7 @@ export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoad
 
   return (
     <motion.aside
+      ref={sidebarRef}
       aria-label="Sidebar"
       className="sidebar"
       initial={false}
@@ -312,27 +376,106 @@ export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoad
       </AnimatePresence>
 
       {/* Account */}
-      <button className="account-btn-sk" aria-label="Account settings">
-        <div className="account-avatar-sk" aria-hidden="true">U</div>
-        <AnimatePresence>
-          {isOpen && (
-            <motion.div
-              key="account-info"
-              className="account-info-sk"
-              initial={{ opacity: 0, x: -6 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -6 }}
-              transition={FADE_TRANSITION}
-            >
-              <div className="account-name-sk">User</div>
-              <div className="account-plan-sk">Hackathon Demo</div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </button>
+      <div ref={accountRef} style={{ position: 'relative' }}>
+        <button
+          className="account-btn-sk"
+          aria-label="Account settings"
+          onClick={toggleAccountMenu}
+        >
+          <div className="account-avatar-sk" aria-hidden="true">{avatarLetter(user)}</div>
+          <AnimatePresence>
+            {isOpen && (
+              <motion.div
+                key="account-info"
+                className="account-info-sk"
+                initial={{ opacity: 0, x: -6 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -6 }}
+                transition={FADE_TRANSITION}
+              >
+                <div className="account-name-sk">{displayName(user)}</div>
+                <div className="account-plan-sk">{(user?.plan || 'free').toUpperCase()} plan</div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </button>
+
+        {createPortal(
+          <AnimatePresence>
+            {isAccountMenuOpen && menuRect && (
+              <motion.div
+                ref={menuRef}
+                key="account-dropdown"
+                className="profile-dropdown-menu"
+                initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1, transition: { duration: 0.2, ease: [0.16, 1, 0.3, 1] } }}
+                exit={{ opacity: 0, y: 6, scale: 0.97, transition: { duration: 0.15, ease: 'easeIn' } }}
+                style={{
+                  position: 'fixed',
+                  left: menuRect.left,
+                  width: menuRect.width,
+                  bottom: window.innerHeight - menuRect.top + 8,
+                  zIndex: 99999,
+                }}
+              >
+                <div className="profile-dropdown-header">
+                  <div className="account-avatar-sk" style={{ width: 32, height: 32, fontSize: 13 }} aria-hidden="true">{avatarLetter(user)}</div>
+                  <div className="profile-dropdown-user-info">
+                    <div className="profile-dropdown-email">{displayName(user)}</div>
+                    <div className="profile-dropdown-plan">{(user?.plan || 'free').toUpperCase()} plan</div>
+                  </div>
+                </div>
+                <div className="profile-dropdown-divider" style={{ marginTop: 0, paddingTop: 0 }}></div>
+                
+                <button className="profile-dropdown-item" onClick={() => setIsAccountMenuOpen(false)}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                  Profile
+                  <span className="profile-dropdown-chevron">›</span>
+                </button>
+                <button className="profile-dropdown-item" onClick={() => setIsAccountMenuOpen(false)}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                  Settings
+                  <span className="profile-dropdown-chevron">›</span>
+                </button>
+                <button className="profile-dropdown-item" onClick={() => setIsAccountMenuOpen(false)}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                  Help
+                </button>
+                <div className="profile-dropdown-divider"></div>
+                <button
+                  className="profile-dropdown-item logout-item"
+                  onClick={async () => {
+                    setIsAccountMenuOpen(false)
+                    if (onLogout) {
+                      await onLogout()
+                    }
+                  }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                  Logout
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
+      </div>
     </motion.aside>
   )
 }
+
+  function displayName(user) {
+    if (!user) return 'User'
+    if (user.name) return user.name
+    if (user.email) return user.email
+    return 'User'
+  }
+
+  function avatarLetter(user) {
+    const source = displayName(user)
+    const letter = source.trim().charAt(0)
+    return (letter || 'U').toUpperCase()
+  }
 
 function MetricRow({ label, value, isAccent }) {
   const [animated, setAnimated] = React.useState(false)
