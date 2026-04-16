@@ -7,11 +7,10 @@ import (
 	"net/http"
 	"strings"
 
-	"axiom/backend/handlers"
-	"axiom/backend/middleware"
 	"axiom/backend/internal/auth"
 	"axiom/backend/internal/models"
 	"axiom/backend/internal/orchestrator"
+	"axiom/backend/middleware"
 )
 
 type Service interface {
@@ -28,10 +27,7 @@ type Service interface {
 }
 
 type Handler struct {
-	service        Service
-	authHandler    *handlers.AuthHandler
-	jwtSecret      string
-	frontendOrigin string
+	service Service
 }
 
 type createSessionResponse struct {
@@ -53,24 +49,15 @@ type authRequest struct {
 	Plan     string `json:"plan,omitempty"`
 }
 
-func NewHandler(service Service, jwtSecret, frontendOrigin string) *Handler {
-	if strings.TrimSpace(frontendOrigin) == "" {
-		frontendOrigin = "http://localhost:5173"
-	}
-
-	return &Handler{
-		service:        service,
-		authHandler:    handlers.NewAuthHandler(service),
-		jwtSecret:      jwtSecret,
-		frontendOrigin: frontendOrigin,
-	}
+func NewHandler(service Service) *Handler {
+	return &Handler{service: service}
 }
 
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	h.registerRoutes(mux, "")
 	h.registerRoutes(mux, "/api")
-	return h.withCORS(mux)
+	return withCORS(mux)
 }
 
 func (h *Handler) registerRoutes(mux *http.ServeMux, prefix string) {
