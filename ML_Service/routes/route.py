@@ -15,7 +15,7 @@ The caller is responsible for forwarding prompt_to_send to the appropriate LLM.
 
 from fastapi import APIRouter, HTTPException
 
-from core.tier_router import route as tier_route
+from core.router_adapter import route as tier_route
 from core.confidence_few_shot import build_confidence_block
 from models.schemas import RouteRequest, RouteResponse
 
