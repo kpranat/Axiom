@@ -57,7 +57,7 @@ COSTS = {
 # Model names
 TIER1_MODEL = "llama-3.1-8b-instant"
 TIER2_MODEL = "llama-3.3-70b-versatile"
-TIER3_MODEL = "gemini-2.5-flash"
+TIER3_MODEL = "gemini-2.5-flash-lite"
 
 # -----------------------------------------------------------------------------
 # 2. CascadeResult dataclass

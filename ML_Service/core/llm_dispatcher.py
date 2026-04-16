@@ -33,7 +33,7 @@ TIERS: dict[str, list[str]] = {
 MODEL_DESCRIPTIONS: dict[str, str] = {
     "llama-3.1-8b-instant": "LLaMA 3.1 8B (REAL) — simple queries, ultra-fast",
     "llama-3.3-70b-versatile": "LLaMA 3.3 70B (REAL) — moderate reasoning, high capacity",
-    "gemini-2.5-flash":  "Gemini 2.5 Flash (REAL) — complex reasoning, frontier",
+    "gemini-2.5-flash-lite":  "Gemini 2.5 Flash Lite (REAL) — complex reasoning, frontier",
 }
 
 _GEMINI_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "25"))
@@ -92,13 +92,13 @@ def _simulate_model_call(model: str, prompt: str) -> tuple[str, int, int]:
             text = f"[ERROR: Groq API failed] {str(e)}"
             return text, default_input, _rough_token_count(text)
 
-    elif model == "gemini-2.5-flash":
+    elif model == "gemini-2.5-flash-lite":
         api_key = os.getenv("GEMINI_API_KEY", "").strip()
         if not api_key:
             text = "[ERROR: Gemini API failed] Missing GEMINI_API_KEY"
             return text, default_input, _rough_token_count(text)
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
@@ -225,7 +225,7 @@ def dispatch(prompt: str, tier: int) -> DispatchResult:
         print(f"\n  >> Trying model  : {model}")
         print(f"     Description   : {desc}")
         
-        status_msg = "CALLING (Real API)..." if model in ("llama-3.1-8b-instant", "llama-3.3-70b-versatile", "gemini-2.5-flash") else "CALLING... (simulated, no real API)"
+        status_msg = "CALLING (Real API)..." if model in ("llama-3.1-8b-instant", "llama-3.3-70b-versatile", "gemini-2.5-flash-lite") else "CALLING... (simulated, no real API)"
         print(f"     Status        : {status_msg}")
 
         # Simulate latency
