@@ -12,12 +12,18 @@ import LogoLight from '../assets/LogoLight.png'
 
 const formatCost = (n) => `$${(n || 0).toFixed(4)}`
 const formatNum = (n) => (n || 0).toLocaleString()
+const totalTokens = (input, output, fallback) => {
+  const inputValue = Number(input || 0)
+  const outputValue = Number(output || 0)
+  const total = inputValue + outputValue
+  return total > 0 ? total : Number(fallback || 0)
+}
 
 /* Spring config shared across sidebar transitions */
 const SIDEBAR_SPRING = { type: 'spring', stiffness: 280, damping: 30 }
 const FADE_TRANSITION = { duration: 0.18, ease: 'easeOut' }
 
-export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoadSession, isOpen, onToggle, theme }) {
+export default function Sidebar({ metrics, lastTurn, messages, sessions, onNewChat, onLoadSession, isOpen, onToggle, theme }) {
   const [searchQuery, setSearchQuery] = React.useState('')
   const [isAccountMenuOpen, setIsAccountMenuOpen] = React.useState(false)
   const [rotationAngle, setRotationAngle] = React.useState(isOpen ? 360 : 0)
@@ -304,7 +310,14 @@ export default function Sidebar({ metrics, messages, sessions, onNewChat, onLoad
               />
               Live Token Usage
             </div>
-            <MetricRow label="Tokens Used" value={formatNum(metrics.tokens_used)} />
+            <MetricRow
+              label="Session Tokens Used"
+              value={formatNum(totalTokens(metrics.input_tokens_used, metrics.output_tokens_used, metrics.tokens_used))}
+            />
+            <MetricRow
+              label="Last Response Tokens"
+              value={formatNum(totalTokens(lastTurn?.input_tokens, lastTurn?.output_tokens, lastTurn?.tokens_used))}
+            />
             <MetricRow label="Tokens Saved" value={formatNum(metrics.tokens_saved)} />
             <MetricRow label="Cache Hits" value={formatNum(metrics.cache_hits)} />
             <MetricRow label="Cache Misses" value={formatNum(metrics.cache_misses)} />

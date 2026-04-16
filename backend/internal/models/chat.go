@@ -10,11 +10,13 @@ type Message struct {
 }
 
 type SessionMetrics struct {
-	TokensUsed  int     `json:"tokens_used"`
-	TokensSaved int     `json:"tokens_saved"`
-	CacheHits   int     `json:"cache_hits"`
-	CacheMisses int     `json:"cache_misses"`
-	CostSaved   float64 `json:"cost_saved"`
+	InputTokensUsed  int     `json:"input_tokens_used"`
+	OutputTokensUsed int     `json:"output_tokens_used"`
+	TokensUsed       int     `json:"tokens_used"`
+	TokensSaved      int     `json:"tokens_saved"`
+	CacheHits        int     `json:"cache_hits"`
+	CacheMisses      int     `json:"cache_misses"`
+	CostSaved        float64 `json:"cost_saved"`
 }
 
 type Session struct {

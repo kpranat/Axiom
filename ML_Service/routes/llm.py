@@ -17,7 +17,11 @@ No real API calls are made — every dispatch is logged to the terminal.
 
 from fastapi import APIRouter, HTTPException
 
-from core.gateway import run_cascade, build_billing_summary
+from core.gateway import (
+    run_cascade,
+    count_groq_tokens,
+    count_gemini_tokens,
+)
 from core.router_adapter import route as tier_route
 from models.schemas import (
     LLMInvokeRequest,
@@ -27,6 +31,16 @@ from models.schemas import (
 )
 
 router = APIRouter(prefix="/llm", tags=["LLM Dispatcher"])
+
+
+def _count_output_tokens(tier: int, text: str) -> int:
+    if not text:
+        return 1
+
+    if tier in (1, 2):
+        return count_groq_tokens(text)
+
+    return count_gemini_tokens("gemini-2.5-flash-lite", text)
 
 
 @router.post(
@@ -61,7 +75,8 @@ async def invoke_llm(request: LLMInvokeRequest) -> LLMInvokeResponse:
                 full_text += chunk
         
         result.response = full_text
-        billing = build_billing_summary(result)
+        input_tokens = sum(result.input_tokens_used.values())
+        output_tokens = _count_output_tokens(result.tier_reached, full_text)
         
         return LLMInvokeResponse(
             tier_number=result.tier_reached,
@@ -71,9 +86,9 @@ async def invoke_llm(request: LLMInvokeRequest) -> LLMInvokeResponse:
             simulated_response=full_text,
             token_breakdown={
                 "model_cascade": {
-                    "input_tokens": sum(result.input_tokens_used.values()),
-                    "output_tokens": 0, # Calculated in billing
-                    "total_tokens": sum(result.input_tokens_used.values()),
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
                 },
                 "attempts": [],
             },
@@ -123,6 +138,8 @@ async def simulate_from_prompt(request: LLMSimulateRequest) -> LLMSimulateRespon
         if result.is_streaming and result.stream_generator:
             for chunk in result.stream_generator:
                 full_text += chunk
+        input_tokens = sum(result.input_tokens_used.values())
+        output_tokens = _count_output_tokens(result.tier_reached, full_text)
         
         return LLMSimulateResponse(
             tier_number=result.tier_reached,

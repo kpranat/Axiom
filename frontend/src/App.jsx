@@ -21,7 +21,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isAppLoading, setIsAppLoading] = useState(true)
 
-  const { messages, sessions, metrics, isLoading, sendMessage, startNewChat, loadSession } = useChat()
+  const { messages, sessions, metrics, lastTurn, isLoading, sendMessage, startNewChat, loadSession } = useChat()
 
   useEffect(() => {
     // Splash screen timer
@@ -109,6 +109,7 @@ export default function App() {
           >
             <MetricsSidebar
               metrics={metrics}
+              lastTurn={lastTurn}
               messages={messages}
               sessions={sessions}
               onNewChat={startNewChat}

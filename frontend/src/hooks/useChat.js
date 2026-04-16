@@ -9,6 +9,8 @@ import { createSession, sendChat, getMetrics } from '../api/client.js'
 const METRICS_POLL_INTERVAL = 2000
 
 const INITIAL_METRICS = {
+  input_tokens_used: 0,
+  output_tokens_used: 0,
   tokens_used: 0,
   tokens_saved: 0,
   cache_hits: 0,
@@ -16,11 +18,21 @@ const INITIAL_METRICS = {
   cost_saved: 0,
 }
 
+const INITIAL_LAST_TURN = {
+  input_tokens: 0,
+  output_tokens: 0,
+  tokens_used: 0,
+  tokens_saved: 0,
+  model_used: '',
+  cache_hit: false,
+}
+
 export function useChat() {
   const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([])
   const [sessions, setSessions] = useState([])
   const [metrics, setMetrics] = useState(INITIAL_METRICS)
+  const [lastTurn, setLastTurn] = useState(INITIAL_LAST_TURN)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
   const pollRef = useRef(null)
@@ -66,6 +78,15 @@ export function useChat() {
 
     try {
       const data = await sendChat(sessionId, prompt)
+      const lastBreakdown = data.token_breakdown?.total || {}
+      setLastTurn({
+        input_tokens: lastBreakdown.input_tokens ?? 0,
+        output_tokens: lastBreakdown.output_tokens ?? 0,
+        tokens_used: lastBreakdown.total_tokens ?? data.tokens_used ?? data.total_tokens_used ?? 0,
+        tokens_saved: data.tokens_saved ?? 0,
+        model_used: data.model_used ?? '',
+        cache_hit: Boolean(data.cache_hit),
+      })
       const aiMsg = {
         id: Date.now() + 1,
         role: 'ai',
@@ -89,6 +110,14 @@ export function useChat() {
         cache_hit: false,
         timestamp: new Date(),
       }
+      setLastTurn({
+        input_tokens: 0,
+        output_tokens: mockMsg.tokens_used,
+        tokens_used: mockMsg.tokens_used,
+        tokens_saved: mockMsg.tokens_saved,
+        model_used: mockMsg.model_used,
+        cache_hit: mockMsg.cache_hit,
+      })
       setMessages(prev => [...prev, mockMsg])
     } finally {
       setIsLoading(false)
@@ -105,6 +134,7 @@ export function useChat() {
     }
     setMessages([])
     setMetrics(INITIAL_METRICS)
+    setLastTurn(INITIAL_LAST_TURN)
     clearInterval(pollRef.current)
     initSession()
   }, [messages])
@@ -123,5 +153,5 @@ export function useChat() {
     }
   }, [sessions, messages])
 
-  return { messages, sessions, metrics, isLoading, error, sessionId, sendMessage, startNewChat, loadSession }
+  return { messages, sessions, metrics, lastTurn, isLoading, error, sessionId, sendMessage, startNewChat, loadSession }
 }

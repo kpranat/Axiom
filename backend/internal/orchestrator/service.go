@@ -253,6 +253,8 @@ func (s *Service) Chat(ctx context.Context, sessionID, prompt string) (ChatRespo
 	totalTokens := totalInput + totalOutput
 	totalBreakdown := newTokenIO(totalInput, totalOutput)
 
+	current.Metrics.InputTokensUsed += totalInput
+	current.Metrics.OutputTokensUsed += totalOutput
 	current.Metrics.TokensUsed += totalTokens
 	current.Metrics.TokensSaved += routeResponse.TokensSaved
 	current.Metrics.CostSaved = estimateCostSaved(current.Metrics.TokensSaved)
