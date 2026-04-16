@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"axiom/backend/internal/auth"
+	"axiom/backend/internal/config"
 	"axiom/backend/internal/models"
 	"axiom/backend/internal/orchestrator"
 )
@@ -26,7 +27,8 @@ type Service interface {
 }
 
 type Handler struct {
-	service Service
+	service     Service
+	rateLimiter *rateLimiter
 }
 
 type createSessionResponse struct {
@@ -48,15 +50,18 @@ type authRequest struct {
 	Plan     string `json:"plan,omitempty"`
 }
 
-func NewHandler(service Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service Service, cfg config.Config) *Handler {
+	return &Handler{
+		service:     service,
+		rateLimiter: newRateLimiter(cfg.RateLimitRequests, cfg.RateLimitWindow),
+	}
 }
 
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	h.registerRoutes(mux, "")
 	h.registerRoutes(mux, "/api")
-	return withCORS(mux)
+	return withCORS(h.withRateLimit(mux))
 }
 
 func (h *Handler) registerRoutes(mux *http.ServeMux, prefix string) {

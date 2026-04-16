@@ -34,7 +34,7 @@ func main() {
 	log.Printf("session store: supabase")
 
 	service := orchestrator.NewService(store, mlClient, cfg)
-	handler := httpapi.NewHandler(service)
+	handler := httpapi.NewHandler(service, cfg)
 	serverHandler := handler.Routes()
 
 	if frontendDist, ok := resolveFrontendDist(); ok {
