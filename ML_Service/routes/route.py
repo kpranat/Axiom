@@ -7,8 +7,7 @@ Full router pipeline endpoint:
     1. Use the raw user prompt (no optimizer step).
     2. If context was supplied, combine it with the raw prompt.
     3. Call the tier router  → assign tier 1 | 2 | 3.
-    4. Append confidence few-shot instructions for cascade decisions.
-  5. Return { prompt_to_send, tier, reason, original_tokens, optimized_tokens, tokens_saved }.
+    4. Return { prompt_to_send, tier, reason, original_tokens, optimized_tokens, tokens_saved }.
 
 The caller is responsible for forwarding prompt_to_send to the appropriate LLM.
 """
@@ -16,7 +15,6 @@ The caller is responsible for forwarding prompt_to_send to the appropriate LLM.
 from fastapi import APIRouter, HTTPException
 
 from core.router_adapter import route as tier_route
-from core.confidence_few_shot import build_confidence_block
 from models.schemas import RouteRequest, RouteResponse
 
 router = APIRouter(tags=["Router"])
@@ -58,6 +56,8 @@ async def route_prompt(request: RouteRequest) -> RouteResponse:
 
         # ── 1. Route tier using raw prompt (+ context signal if present) ─────
         route_result = tier_route(raw_prompt, active_context)
+        route_source = "llama" if route_result.reason.startswith("[router=llama]") else "fallback"
+        print(f"[ROUTER_DEBUG] source={route_source} tier={route_result.tier} reason={route_result.reason}")
 
         # ── 2. Build final prompt by combining raw prompt + context ──────────
         if active_context:
@@ -65,11 +65,7 @@ async def route_prompt(request: RouteRequest) -> RouteResponse:
         else:
             final_prompt = raw_prompt
 
-        # ── 3. Append few-shot confidence block ──────────────────────────────
-        confidence_block = build_confidence_block(route_result.tier)
-        final_prompt = f"{final_prompt}\n\n{confidence_block}"
-
-        # ── 4. Return ─────────────────────────────────────────────────────────
+        # ── 3. Return ─────────────────────────────────────────────────────────
         return RouteResponse(
             prompt_to_send=final_prompt,
             tier=route_result.tier,

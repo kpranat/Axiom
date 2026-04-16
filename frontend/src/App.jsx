@@ -22,8 +22,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isAppLoading, setIsAppLoading] = useState(true)
 
-  const { messages, sessions, metrics, isLoading, sendMessage, startNewChat, loadSession } = useChat()
-  const { user, logout } = useAuth()
+  const { messages, sessions, metrics, isLoading, sendMessage, startNewChat, loadSession, isViewingHistory } = useChat()
 
   useEffect(() => {
     // Splash screen timer
@@ -124,6 +123,7 @@ export default function App() {
               isOpen={isSidebarOpen}
               onToggle={toggleSidebar}
               theme={theme}
+              isViewingHistory={isViewingHistory}
             />
             <Chat
               messages={messages}
