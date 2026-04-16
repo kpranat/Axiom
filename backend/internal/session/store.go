@@ -31,7 +31,7 @@ func (s *Store) Create(userID string) (*models.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[session.ID] = session
-	return CloneSession(session), nil
+	return cloneSession(session)
 }
 
 func (s *Store) Get(sessionID string) (*models.Session, error) {
@@ -82,4 +82,14 @@ func (s *Store) ListByUser(userID string) ([]*models.Session, error) {
 	})
 
 	return sessions, nil
+}
+
+func cloneSession(session *models.Session) *models.Session {
+	if session == nil {
+		return nil
+	}
+
+	cloned := *session
+	cloned.Messages = append([]models.Message(nil), session.Messages...)
+	return &cloned
 }

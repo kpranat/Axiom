@@ -17,8 +17,13 @@ No real API calls are made — every dispatch is logged to the terminal.
 
 from fastapi import APIRouter, HTTPException
 
+<<<<<<< HEAD
 from core.llm_dispatcher import dispatch
 from core.router_adapter import route as tier_route
+=======
+from core.gateway import run_cascade, build_billing_summary
+from core.tier_router import route as tier_route
+>>>>>>> modelcascader
 from models.schemas import (
     LLMInvokeRequest,
     LLMInvokeResponse,
@@ -52,20 +57,30 @@ async def invoke_llm(request: LLMInvokeRequest) -> LLMInvokeResponse:
     Pair it with `/route` to get the full Axiom TokenOptimizer pipeline.
     """
     try:
-        result = dispatch(prompt=request.prompt_to_send, tier=request.tier)
+        # Use the production-grade gateway instead of the simulated dispatcher
+        result = run_cascade(request.prompt_to_send, start_tier=request.tier)
+        
+        full_text = ""
+        if result.is_streaming and result.stream_generator:
+            for chunk in result.stream_generator:
+                full_text += chunk
+        
+        result.response = full_text
+        billing = build_billing_summary(result)
+        
         return LLMInvokeResponse(
-            tier_number=result.tier_number,
-            tier_name=result.tier_name,
-            model_used=result.model_used,
-            models_tried=result.models_tried,
-            simulated_response=result.simulated_response,
+            tier_number=result.tier_reached,
+            tier_name="LOW" if result.tier_reached == 1 else "MID" if result.tier_reached == 2 else "HIGH",
+            model_used="gemini-2.5-flash" if result.tier_reached == 3 else "llama-3.1" if result.tier_reached == 1 else "llama-3.3",
+            models_tried=[f"tier{i}" for i in range(request.tier, result.tier_reached + 1)],
+            simulated_response=full_text,
             token_breakdown={
                 "model_cascade": {
-                    "input_tokens": result.cascade_input_tokens,
-                    "output_tokens": result.cascade_output_tokens,
-                    "total_tokens": result.cascade_input_tokens + result.cascade_output_tokens,
+                    "input_tokens": sum(result.input_tokens_used.values()),
+                    "output_tokens": 0, # Calculated in billing
+                    "total_tokens": sum(result.input_tokens_used.values()),
                 },
-                "attempts": result.model_attempts,
+                "attempts": [],
             },
         )
     except Exception as exc:
@@ -99,21 +114,27 @@ async def simulate_from_prompt(request: LLMSimulateRequest) -> LLMSimulateRespon
         route_result = tier_route(request.prompt, request.context)
 
         print("\n" + "-" * 60)
-        print("[LLM_SIM] Incoming prompt received")
-        print(f"[LLM_SIM] Tier resolved: {route_result.tier} ({'LOW' if route_result.tier == 1 else 'MID' if route_result.tier == 2 else 'HIGH'})")
-        print(f"[LLM_SIM] Reason      : {route_result.reason}")
+        print("[LLM_GATEWAY] Incoming prompt received")
+        print(f"[LLM_GATEWAY] Tier resolved: {route_result.tier} ({'LOW' if route_result.tier == 1 else 'MID' if route_result.tier == 2 else 'HIGH'})")
+        print(f"[LLM_GATEWAY] Reason      : {route_result.reason}")
         print("-" * 60)
 
-        result = dispatch(prompt=request.prompt, tier=route_result.tier)
-
+        # Use the gateway instead of the simulated dispatcher
+        result = run_cascade(request.prompt, start_tier=route_result.tier)
+        
+        full_text = ""
+        if result.is_streaming and result.stream_generator:
+            for chunk in result.stream_generator:
+                full_text += chunk
+        
         return LLMSimulateResponse(
-            tier_number=result.tier_number,
-            tier_name=result.tier_name,
+            tier_number=result.tier_reached,
+            tier_name="LOW" if result.tier_reached == 1 else "MID" if result.tier_reached == 2 else "HIGH",
             tier_reason=route_result.reason,
-            model_used=result.model_used,
-            models_tried=result.models_tried,
-            prompt_sent=result.prompt_sent,
-            simulated_response=result.simulated_response,
+            model_used="gemini-2.5-flash" if result.tier_reached == 3 else "llama-native",
+            models_tried=[f"tier{i}" for i in range(route_result.tier, result.tier_reached + 1)],
+            prompt_sent=request.prompt,
+            simulated_response=full_text,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
