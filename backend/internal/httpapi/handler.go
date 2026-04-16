@@ -50,8 +50,10 @@ func (h *Handler) Routes() http.Handler {
 func (h *Handler) registerRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc(prefix+"/health", h.handleHealth)
 	mux.HandleFunc(prefix+"/session", h.handleSession)
+	mux.HandleFunc(prefix+"/sessions/", h.handleSessionByID)
 	mux.HandleFunc(prefix+"/chat", h.handleChat)
 	mux.HandleFunc(prefix+"/metrics/", h.handleMetrics)
+	mux.HandleFunc(prefix+"/users/", h.handleUsers)
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +106,11 @@ func (h *Handler) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := strings.TrimPrefix(r.URL.Path, "/sessions/")
+	path := r.URL.Path
+	sessionID := strings.TrimPrefix(path, "/sessions/")
+	if strings.HasPrefix(path, "/api/sessions/") {
+		sessionID = strings.TrimPrefix(path, "/api/sessions/")
+	}
 	if sessionID == "" || strings.Contains(sessionID, "/") {
 		writeError(w, http.StatusBadRequest, errors.New("session_id is required"))
 		return
@@ -199,6 +205,9 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/users/")
+	if strings.HasPrefix(r.URL.Path, "/api/users/") {
+		path = strings.TrimPrefix(r.URL.Path, "/api/users/")
+	}
 	parts := strings.Split(path, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] != "sessions" {
 		writeError(w, http.StatusNotFound, errors.New("route not found"))

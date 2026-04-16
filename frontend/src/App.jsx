@@ -9,7 +9,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import MetricsSidebar from './components/MetricsSidebar.jsx'
 import Chat from './components/Chat.jsx'
 import { useChat } from './hooks/useChat.js'
-import Logo from './assets/Adobe Express - file.png'
+import LogoDark from './assets/LogoBlack.png'
+import LogoLight from './assets/LogoLight.png'
+import BgDark from './assets/Bagrounddark.png'
+import BgLight from './assets/bagroundLight.png'
 
 export default function App() {
   const [theme, setTheme] = useState(() => {
@@ -18,7 +21,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isAppLoading, setIsAppLoading] = useState(true)
 
-  const { messages, metrics, isLoading, sendMessage, startNewChat } = useChat()
+  const { messages, sessions, metrics, isLoading, sendMessage, startNewChat, loadSession } = useChat()
 
   useEffect(() => {
     // Splash screen timer
@@ -43,7 +46,24 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell" style={{ position: 'relative' }}>
+    <div className="app-shell">
+      {/* Layer 1 — Background Anchor */}
+      <motion.div
+        className="bg-anchor"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: isAppLoading ? 0 : 1 }}
+        transition={{ duration: 1.2, ease: 'easeInOut', delay: 0.2 }}
+        style={{ backgroundImage: `url(${theme === 'dark' ? BgDark : BgLight})` }}
+      />
+      {/* Layer 2 — Chameleon Overlay */}
+      <motion.div
+        className="bg-overlay"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: isAppLoading ? 0 : 1 }}
+        transition={{ duration: 1.5, ease: 'easeInOut', delay: 0.4 }}
+      />
+
+      {/* Layer 3 — UI Content */}
       <AnimatePresence mode="wait">
         {isAppLoading ? (
           <motion.div
@@ -53,25 +73,25 @@ export default function App() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.6, ease: 'easeInOut' }}
             style={{
-              position: 'absolute',
+              position: 'fixed',
               inset: 0,
               zIndex: 9999,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: 'var(--bg-app)'
+              background: theme === 'dark' ? '#111111' : '#f0eeeb',
             }}
           >
             <motion.img
-              src={Logo}
+              src={theme === 'dark' ? LogoDark : LogoLight}
               alt="Axiom Logo"
               initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ 
-                scale: 1, 
-                opacity: 1, 
-                rotate: 360 
+              animate={{
+                scale: 1,
+                opacity: 1,
+                rotate: 360
               }}
-              transition={{ 
+              transition={{
                 scale: { duration: 0.8, ease: 'easeOut' },
                 opacity: { duration: 0.8 },
                 rotate: { duration: 2, ease: 'linear', repeat: Infinity }
@@ -82,7 +102,7 @@ export default function App() {
         ) : (
           <motion.div
             key="app"
-            style={{ display: 'flex', height: '100vh', width: '100%' }}
+            className="app-content"
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.6, ease: 'easeOut' }}
@@ -90,9 +110,12 @@ export default function App() {
             <MetricsSidebar
               metrics={metrics}
               messages={messages}
+              sessions={sessions}
               onNewChat={startNewChat}
+              onLoadSession={loadSession}
               isOpen={isSidebarOpen}
               onToggle={toggleSidebar}
+              theme={theme}
             />
             <Chat
               messages={messages}

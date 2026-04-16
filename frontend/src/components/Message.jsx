@@ -5,8 +5,9 @@
 
 import { motion } from 'framer-motion'
 
-export default function Message({ message }) {
+export default function Message({ message, onAnimationComplete }) {
   const isUser = message.role === 'user'
+  const content = normalizeContent(message.content)
 
   const badgeInfo = getBadge(message)
   const timeStr = message.timestamp
@@ -14,37 +15,31 @@ export default function Message({ message }) {
     : null
 
   const renderAiContent = () => {
-    const words = message.content.split(' ')
+    const segments = splitByCodeFence(content)
 
     return (
       <motion.div
-        variants={{
-          hidden: { opacity: 1 },
-          visible: {
-            opacity: 1,
-            transition: { staggerChildren: 0.08 }
-          }
-        }}
-        initial="hidden"
-        animate="visible"
-        style={{ display: 'inline-block' }}
+        className="message-content"
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.22, ease: 'easeOut' }}
+        onAnimationComplete={onAnimationComplete}
       >
-        {words.map((word, i) => (
-          <motion.span
-            key={i}
-            variants={{
-              hidden: { opacity: 0, y: 4 },
-              visible: { 
-                opacity: 1, 
-                y: 0, 
-                transition: { duration: 0.3, ease: 'easeOut' }
-              }
-            }}
-            style={{ display: 'inline-block', whiteSpace: 'pre-wrap' }}
-          >
-            {word + (i < words.length - 1 ? ' ' : '')}
-          </motion.span>
-        ))}
+        {segments.map((segment, index) => {
+          if (segment.type === 'code') {
+            return (
+              <pre key={index} className="message-code">
+                <code>{segment.value}</code>
+              </pre>
+            )
+          }
+
+          return (
+            <p key={index} className="message-text">
+              {segment.value}
+            </p>
+          )
+        })}
       </motion.div>
     )
   }
@@ -52,66 +47,85 @@ export default function Message({ message }) {
   return (
     <div className={`message-wrapper ${isUser ? 'user' : 'ai'}`}>
       <div className="message-bubble">
-        {isUser ? message.content : renderAiContent()}
+        {isUser ? content : renderAiContent()}
       </div>
 
       {!isUser && (
-        <>
-          <div className="message-meta">
-            {badgeInfo && (
-              <span className={`badge badge-${badgeInfo.type}`} aria-label={badgeInfo.label}>
-                {badgeInfo.icon} {badgeInfo.label}
-              </span>
-            )}
-            {timeStr && <span className="message-time">{timeStr}</span>}
-          </div>
-          <TokenBreakdown message={message} />
-        </>
+        <div className="message-meta">
+          {badgeInfo && (
+            <span className={`badge badge-${badgeInfo.type}`} aria-label={badgeInfo.label}>
+              {badgeInfo.icon} {badgeInfo.label}
+            </span>
+          )}
+          {timeStr && <span className="message-time">{timeStr}</span>}
+        </div>
       )}
     </div>
   )
 }
 
-function TokenBreakdown({ message }) {
-  const breakdown = message.token_breakdown
-  if (!breakdown) return null
+function normalizeContent(value) {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (value == null) {
+    return ''
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
+}
 
-  const rows = [
-    { label: 'Context Summary', value: breakdown.context_summary },
-    { label: 'Optimize Prompt', value: breakdown.optimize_prompt },
-    { label: 'Model Cascade', value: breakdown.model_cascade },
-    { label: 'Total', value: breakdown.total },
-  ].filter(row => row.value)
+function splitByCodeFence(content) {
+  const result = []
+  const regex = /```(?:[a-zA-Z0-9_+-]+)?\n?([\s\S]*?)```/g
+  let cursor = 0
+  let match = regex.exec(content)
 
-  if (!rows.length) return null
+  while (match) {
+    const codeStart = match.index
+    const codeEnd = regex.lastIndex
 
-  const totalUsed = message.total_tokens_used ?? breakdown.total?.total_tokens ?? 0
+    if (codeStart > cursor) {
+      const textChunk = content.slice(cursor, codeStart)
+      if (textChunk.trim() !== '') {
+        result.push({ type: 'text', value: textChunk })
+      }
+    }
 
-  return (
-    <div className="token-breakdown" aria-label="Token breakdown">
-      <div className="token-breakdown-title">Token Usage: {totalUsed}</div>
-      {rows.map(row => (
-        <div className="token-breakdown-row" key={row.label}>
-          <span>{row.label}</span>
-          <span>in {row.value.input_tokens || 0} / out {row.value.output_tokens || 0}</span>
-        </div>
-      ))}
-    </div>
-  )
+    result.push({ type: 'code', value: match[1].replace(/\n$/, '') })
+    cursor = codeEnd
+    match = regex.exec(content)
+  }
+
+  if (cursor < content.length) {
+    const trailingText = content.slice(cursor)
+    if (trailingText.trim() !== '') {
+      result.push({ type: 'text', value: trailingText })
+    }
+  }
+
+  if (result.length === 0) {
+    return [{ type: 'text', value: content }]
+  }
+
+  return result
 }
 
 function getBadge(message) {
   if (message.cache_hit) {
     return { type: 'cache', label: 'Cache Hit', icon: '⚡' }
   }
-  if (!message.model_used) return null
-
-  if (message.model_used.includes('gemini') || message.model_used.includes('70b')) {
-    return { type: 'large', label: message.model_used, icon: '🔮' }
+  if (message.model_used === 'gpt-4o') {
+    return { type: 'large', label: 'GPT-4o', icon: '🔮' }
   }
-  if (message.model_used.includes('8b')) {
-    return { type: 'small', label: message.model_used, icon: '✦' }
+  if (message.model_used === 'gpt-3.5-turbo') {
+    return { type: 'small', label: 'GPT-3.5', icon: '✦' }
   }
-
-  return { type: 'small', label: message.model_used, icon: '✦' }
+  return null
 }

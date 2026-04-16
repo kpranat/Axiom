@@ -27,7 +27,7 @@ TIER_NAMES: dict[int, str] = {
 TIERS: dict[str, list[str]] = {
     "LOW":  ["llama-3.1-8b-instant"],
     "MID":  ["llama-3.3-70b-versatile"],
-    "HIGH": ["gemini-2.5-flash"],
+    "HIGH": ["llama-3.3-70b-versatile"],
 }
 
 MODEL_DESCRIPTIONS: dict[str, str] = {

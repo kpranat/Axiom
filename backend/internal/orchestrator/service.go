@@ -14,7 +14,7 @@ import (
 )
 
 type SessionStore interface {
-	Create(userID string) *models.Session
+	Create(userID string) (*models.Session, error)
 	Get(sessionID string) (*models.Session, error)
 	Update(session *models.Session) error
 	ListByUser(userID string) ([]*models.Session, error)
@@ -93,7 +93,7 @@ func NewService(store SessionStore, mlClient MLClient, cfg config.Config) *Servi
 }
 
 func (s *Service) CreateSession(ctx context.Context, userID string) (*models.Session, error) {
-	return s.store.Create(strings.TrimSpace(userID)), nil
+	return s.store.Create(strings.TrimSpace(userID))
 }
 
 func (s *Service) GetMetrics(sessionID string) (models.SessionMetrics, error) {
