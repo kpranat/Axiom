@@ -25,7 +25,7 @@ from groq import Groq
 # -----------------------------------------------------------------------------
 # 1. Constants
 # -----------------------------------------------------------------------------
-TIER_SYSTEM_PROMPT = """Reply ONLY: CASCADE if complex or unsure.Nothing before it. Nothing after it. Just: CASCADE. Else answer."""
+TIER_SYSTEM_PROMPT = """Triage: CASCADE if complex/expert. Else answer"""
 
 SIGNAL = "CASCADE"
 BUFFER_LIMIT = 15   # chars to buffer before checking for CASCADE signal
