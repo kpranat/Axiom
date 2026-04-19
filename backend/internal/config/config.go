@@ -15,8 +15,12 @@ type Config struct {
 	MLServiceBaseURL string
 	SummaryInterval  int
 	RequestTimeout   time.Duration
-	SupabaseURL      string
-	SupabaseKey      string
+	// LLMTimeout is used exclusively for the ML service /llm/invoke call.
+	// Gemini Tier 3 can take several minutes for large responses, so this
+	// must be much larger than the general RequestTimeout.
+	LLMTimeout   time.Duration
+	SupabaseURL  string
+	SupabaseKey  string
 }
 
 func Load() Config {
@@ -27,6 +31,7 @@ func Load() Config {
 		MLServiceBaseURL: getEnv("AXIOM_ML_SERVICE_URL", "http://127.0.0.1:8000"),
 		SummaryInterval:  getEnvInt("AXIOM_SUMMARY_INTERVAL", 5),
 		RequestTimeout:   time.Duration(getEnvInt("AXIOM_REQUEST_TIMEOUT_SECONDS", 30)) * time.Second,
+		LLMTimeout:       time.Duration(getEnvInt("AXIOM_LLM_TIMEOUT_SECONDS", 300)) * time.Second,
 		SupabaseURL:      getEnv("SUPABASE_URL", ""),
 		SupabaseKey:      getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
 	}

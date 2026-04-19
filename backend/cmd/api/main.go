@@ -23,10 +23,16 @@ func main() {
 	}
 
 	httpClient := &http.Client{
-		Timeout: cfg.RequestTimeout,
+		Timeout: cfg.RequestTimeout, // 30 s — used for Supabase calls
 	}
 
-	mlClient := ml.NewClient(cfg.MLServiceBaseURL, httpClient)
+	// The ML /llm/invoke call can take several minutes when Gemini generates
+	// a long response; give it its own client with a much larger timeout.
+	mlHTTPClient := &http.Client{
+		Timeout: cfg.LLMTimeout, // 300 s default (AXIOM_LLM_TIMEOUT_SECONDS)
+	}
+
+	mlClient := ml.NewClient(cfg.MLServiceBaseURL, mlHTTPClient)
 	store, err := session.NewSupabaseStore(cfg.SupabaseURL, cfg.SupabaseKey, httpClient)
 	if err != nil {
 		log.Fatalf("supabase store init failed: %v", err)
