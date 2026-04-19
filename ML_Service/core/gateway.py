@@ -117,15 +117,13 @@ def calculate_cost(tier: int, input_tokens: int, output_tokens: int) -> float:
 
 def build_billing_summary(cascade_result: CascadeResult) -> dict:
     tier = cascade_result.tier_reached
-    total_cost = 0.0
     tier_costs = {1: 0.0, 2: 0.0, 3: 0.0}
 
-    for t_str, tokens in cascade_result.input_tokens_used.items():
-        if tokens > 0:
-            t = int(t_str.replace("tier", ""))
-            c = calculate_cost(t, tokens, 0)
-            tier_costs[t] += c
-            total_cost += c
+    # ── Only the FINAL tier's tokens are billable. ─────────────────────────────
+    # Cascaded tiers produced no usable output; their ghost tokens are excluded.
+    in_toks = cascade_result.input_tokens_used.get(f"tier{tier}", 0)
+    in_cost = calculate_cost(tier, in_toks, 0)
+    tier_costs[tier] += in_cost
 
     output_tokens = 0
     if cascade_result.response:
@@ -138,14 +136,24 @@ def build_billing_summary(cascade_result: CascadeResult) -> dict:
 
     out_cost = calculate_cost(tier, 0, output_tokens)
     tier_costs[tier] += out_cost
-    total_cost += out_cost
 
-    charge_to_user = tier_costs[tier]
+    total_cost = tier_costs[tier]   # only final-tier cost is real
+    charge_to_user = total_cost
 
-    in_toks = cascade_result.input_tokens_used.get(f"tier{tier}", 0)
     model_name = TIER1_MODEL if tier == 1 else TIER2_MODEL if tier == 2 else TIER3_MODEL
-    logging.info(f"[ANSWER] Tier {tier} ({model_name}) answered. Input tokens: {in_toks}, Output tokens: {output_tokens}")
-    logging.info(f"[COST] Total request cost: ${total_cost:.8f} | Charged to user: ${charge_to_user:.8f}")
+    total_tokens = in_toks + output_tokens
+
+    logging.info("")
+    logging.info("╔══ TOKEN USAGE ═══════════════════════════════════════════╗")
+    logging.info(f"║  Answered by  : Tier {tier} — {model_name:<33}║")
+    logging.info("╠══════════════════════════════════════════════════════════╣")
+    logging.info(f"║  Input  tokens: {in_toks:<6}  (cost: ${in_cost:.8f})             ║")
+    logging.info(f"║  Output tokens: {output_tokens:<6}  (cost: ${out_cost:.8f})             ║")
+    logging.info(f"║  Total  tokens: {total_tokens:<6}                                     ║")
+    logging.info("╠══════════════════════════════════════════════════════════╣")
+    logging.info(f"║  Total cost   : ${total_cost:.8f}                              ║")
+    logging.info("╚══════════════════════════════════════════════════════════╝")
+    logging.info("")
 
     return {
         "tier1_cost": tier_costs[1],
@@ -153,7 +161,7 @@ def build_billing_summary(cascade_result: CascadeResult) -> dict:
         "tier3_cost": tier_costs[3],
         "total_cost": total_cost,
         "charge_to_user": charge_to_user,
-        "absorbed_cost": total_cost - charge_to_user,
+        "absorbed_cost": 0.0,   # no ghost cost absorbed — it was never counted
     }
 
 # -----------------------------------------------------------------------------
@@ -347,47 +355,48 @@ def run_cascade(user_prompt: str, start_tier: int = 1) -> CascadeResult:
     """
     Run the cascade from start_tier upward.
     Tier 1 → Tier 2 → Tier 3 (Tier 3 always replies).
+
+    Token counting rule: only the FINAL answering tier's input tokens are
+    stored in input_tokens_used. Cascaded tiers are logged for observability
+    but their tokens are NOT included — they produced no usable output.
     """
-    input_tokens: dict = {"tier1": 0, "tier2": 0, "tier3": 0}
 
     # ── Tier 1 ────────────────────────────────────────────────────────────────
     if start_tier <= 1:
         t1_in_toks = count_groq_tokens(TIER_SYSTEM_PROMPT + "\n\n" + user_prompt)
-        input_tokens["tier1"] = t1_in_toks
         logging.info(f"┌─ Attempting Tier 1 ({TIER1_MODEL})")
         res1 = stream_tier1(user_prompt, TIER_SYSTEM_PROMPT)
         if not res1.cascaded:
-            res1.input_tokens_used = input_tokens.copy()
+            # Tier 1 answered — only charge its tokens
+            res1.input_tokens_used = {"tier1": t1_in_toks, "tier2": 0, "tier3": 0}
             return res1
-        total_so_far = sum(input_tokens.values())
         logging.info(
             f"[ESCALATE] Tier 1 → Tier 2  |  "
-            f"Input tokens charged for Tier 1: {t1_in_toks}  |  Running total: {total_so_far}"
+            f"Tier 1 input tokens (ghost, not billed): {t1_in_toks}"
         )
         logging.info(f"           Escalating with prompt: \"{user_prompt[:50]}...\"")
 
     # ── Tier 2 ────────────────────────────────────────────────────────────────
     if start_tier <= 2:
         t2_in_toks = count_groq_tokens(TIER_SYSTEM_PROMPT + "\n\n" + user_prompt)
-        input_tokens["tier2"] = t2_in_toks
         logging.info(f"┌─ Attempting Tier 2 ({TIER2_MODEL})")
         res2 = stream_tier2(user_prompt, TIER_SYSTEM_PROMPT)
         if not res2.cascaded:
-            res2.input_tokens_used = input_tokens.copy()
+            # Tier 2 answered — only charge its tokens (Tier 1 was ghost)
+            res2.input_tokens_used = {"tier1": 0, "tier2": t2_in_toks, "tier3": 0}
             return res2
-        total_so_far = sum(input_tokens.values())
         logging.info(
             f"[ESCALATE] Tier 2 → Tier 3  |  "
-            f"Input tokens charged for Tier 2: {t2_in_toks}  |  Running total: {total_so_far}"
+            f"Tier 2 input tokens (ghost, not billed): {t2_in_toks}"
         )
         logging.info(f"           Escalating with prompt: \"{user_prompt[:50]}...\"")
 
     # ── Tier 3 (must answer) ──────────────────────────────────────────────────
     t3_in_toks = count_gemini_tokens(TIER3_MODEL, user_prompt)
-    input_tokens["tier3"] = t3_in_toks
     logging.info(f"┌─ Attempting Tier 3 ({TIER3_MODEL})")
     res3 = stream_tier3(user_prompt)
-    res3.input_tokens_used = input_tokens.copy()
+    # Only Tier 3's tokens are charged — prior tiers were ghost
+    res3.input_tokens_used = {"tier1": 0, "tier2": 0, "tier3": t3_in_toks}
     return res3
 
 # -----------------------------------------------------------------------------

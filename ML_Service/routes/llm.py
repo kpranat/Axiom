@@ -16,11 +16,15 @@ No real API calls are made — every dispatch is logged to the terminal.
 """
 
 from fastapi import APIRouter, HTTPException
+import logging
 
 from core.gateway import (
     run_cascade,
     count_groq_tokens,
     count_gemini_tokens,
+    TIER1_MODEL,
+    TIER2_MODEL,
+    TIER3_MODEL,
 )
 from core.router_adapter import route as tier_route
 from models.schemas import (
@@ -40,7 +44,22 @@ def _count_output_tokens(tier: int, text: str) -> int:
     if tier in (1, 2):
         return count_groq_tokens(text)
 
-    return count_gemini_tokens("gemini-2.5-flash-lite", text)
+    return count_gemini_tokens(TIER3_MODEL, text)
+
+
+def _log_token_usage(tier: int, input_tokens: int, output_tokens: int) -> None:
+    """Print a clean token usage summary box to the terminal."""
+    total = input_tokens + output_tokens
+    model_name = TIER1_MODEL if tier == 1 else TIER2_MODEL if tier == 2 else TIER3_MODEL
+    logging.info("")
+    logging.info("╔══ TOKEN USAGE ═══════════════════════════════════════════╗")
+    logging.info(f"║  Answered by  : Tier {tier} — {model_name:<33}║")
+    logging.info("╠══════════════════════════════════════════════════════════╣")
+    logging.info(f"║  Input  tokens: {input_tokens:<40}║")
+    logging.info(f"║  Output tokens: {output_tokens:<40}║")
+    logging.info(f"║  Total  tokens: {total:<40}║")
+    logging.info("╚══════════════════════════════════════════════════════════╝")
+    logging.info("")
 
 
 @router.post(
@@ -75,21 +94,23 @@ async def invoke_llm(request: LLMInvokeRequest) -> LLMInvokeResponse:
                 full_text += chunk
         
         result.response = full_text
-        input_tokens = sum(result.input_tokens_used.values())
-        output_tokens = _count_output_tokens(result.tier_reached, full_text)
-        total_tokens = input_tokens + output_tokens
+        tier = result.tier_reached
+        input_tokens = result.input_tokens_used.get(f"tier{tier}", 0)
+        output_tokens = _count_output_tokens(tier, full_text)
+        
+        _log_token_usage(tier, input_tokens, output_tokens)
         
         return LLMInvokeResponse(
-            tier_number=result.tier_reached,
-            tier_name="LOW" if result.tier_reached == 1 else "MID" if result.tier_reached == 2 else "HIGH",
-            model_used="gemini-2.5-flash-lite" if result.tier_reached == 3 else "llama-3.1" if result.tier_reached == 1 else "llama-3.3",
-            models_tried=[f"tier{i}" for i in range(request.tier, result.tier_reached + 1)],
+            tier_number=tier,
+            tier_name="LOW" if tier == 1 else "MID" if tier == 2 else "HIGH",
+            model_used=TIER3_MODEL if tier == 3 else TIER1_MODEL if tier == 1 else TIER2_MODEL,
+            models_tried=[f"tier{i}" for i in range(request.tier, tier + 1)],
             simulated_response=full_text,
             token_breakdown={
                 "model_cascade": {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
-                    "total_tokens": total_tokens,
+                    "total_tokens": input_tokens + output_tokens,
                 },
                 "attempts": [],
             },
@@ -132,23 +153,25 @@ async def simulate_from_prompt(request: LLMSimulateRequest) -> LLMSimulateRespon
         print(f"[LLM_GATEWAY] Reason      : {route_result.reason}")
         print("-" * 60)
 
-        # Use the gateway instead of the simulated dispatcher
         result = run_cascade(request.prompt, start_tier=route_result.tier)
-        
+
         full_text = ""
         if result.is_streaming and result.stream_generator:
             for chunk in result.stream_generator:
                 full_text += chunk
-        input_tokens = sum(result.input_tokens_used.values())
-        output_tokens = _count_output_tokens(result.tier_reached, full_text)
-        total_tokens = input_tokens + output_tokens
-        
+
+        tier = result.tier_reached
+        input_tokens = result.input_tokens_used.get(f"tier{tier}", 0)
+        output_tokens = _count_output_tokens(tier, full_text)
+
+        _log_token_usage(tier, input_tokens, output_tokens)
+
         return LLMSimulateResponse(
-            tier_number=result.tier_reached,
-            tier_name="LOW" if result.tier_reached == 1 else "MID" if result.tier_reached == 2 else "HIGH",
+            tier_number=tier,
+            tier_name="LOW" if tier == 1 else "MID" if tier == 2 else "HIGH",
             tier_reason=route_result.reason,
-            model_used="gemini-2.5-flash-lite" if result.tier_reached == 3 else "llama-native",
-            models_tried=[f"tier{i}" for i in range(route_result.tier, result.tier_reached + 1)],
+            model_used=TIER3_MODEL if tier == 3 else TIER1_MODEL if tier == 1 else TIER2_MODEL,
+            models_tried=[f"tier{i}" for i in range(route_result.tier, tier + 1)],
             prompt_sent=request.prompt,
             simulated_response=full_text,
         )
