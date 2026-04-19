@@ -16,6 +16,8 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 # Load environment variables — find_dotenv() walks up the tree automatically
 load_dotenv(find_dotenv(usecwd=True))
+# Also load ML_Service/.env directly so Gemini key works regardless of launch CWD.
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"), override=False)
 
 import google.generativeai as genai
 from groq import Groq
@@ -23,20 +25,7 @@ from groq import Groq
 # -----------------------------------------------------------------------------
 # 1. Constants
 # -----------------------------------------------------------------------------
-TIER_SYSTEM_PROMPT = """You are a highly efficient assistant.
-
-STRICT RULE: If the user's question requires any of the following:
-- Advanced mathematics or formal proofs
-- Deep multi-step code generation (more than 20 lines)
-- Specialized domain knowledge you are not confident about
-- Legal, medical, or financial analysis
-- Complex reasoning chains longer than 5 steps
-
-Then your ENTIRE response must be the single word: CASCADE
-Nothing before it. Nothing after it. Just: CASCADE
-
-If you can answer confidently and correctly, answer normally.
-Do NOT use CASCADE for simple questions."""
+TIER_SYSTEM_PROMPT = """Reply ONLY: CASCADE if complex or unsure.Nothing before it. Nothing after it. Just: CASCADE. Else answer."""
 
 SIGNAL = "CASCADE"
 BUFFER_LIMIT = 15   # chars to buffer before checking for CASCADE signal
@@ -291,27 +280,51 @@ def stream_tier3(prompt: str) -> CascadeResult:
     """Tier 3 — Gemini 2.5 Flash (Google, frontier)"""
     start_time = time.perf_counter()
     tier = 3
+    key_source = "GOOGLE_API_KEY" if os.environ.get("GOOGLE_API_KEY") else "GEMINI_API_KEY"
     api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
         logging.error(f"[ERROR] Tier {tier} failed: Missing GOOGLE_API_KEY / GEMINI_API_KEY")
         raise RuntimeError("Missing GOOGLE_API_KEY")
 
     genai.configure(api_key=api_key)
+    model_candidates = [TIER3_MODEL, "gemini-1.5-flash"] if TIER3_MODEL != "gemini-1.5-flash" else [TIER3_MODEL]
+    logging.info(
+        f"[GEMINI_DEBUG] Tier {tier} start | key_source={key_source} | key_present={bool(api_key)} | "
+        f"model_candidates={model_candidates}"
+    )
     try:
-        model = genai.GenerativeModel(TIER3_MODEL)
-        response = model.generate_content(
-            prompt,
-            stream=True,
-            generation_config=genai.types.GenerationConfig(temperature=1.0),
-        )
+        last_error: Optional[Exception] = None
+        response = None
+        selected_model = None
+        for model_name in model_candidates:
+            try:
+                logging.info(f"[GEMINI_DEBUG] Trying model={model_name}")
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(
+                    prompt,
+                    stream=True,
+                    generation_config=genai.types.GenerationConfig(temperature=1.0),
+                )
+                selected_model = model_name
+                logging.info(f"[GEMINI_DEBUG] Connected model={model_name}")
+                break
+            except Exception as e:
+                last_error = e
+                logging.error(f"[GEMINI_DEBUG] Model failed={model_name} | {type(e).__name__}: {e}")
+
+        if response is None:
+            raise RuntimeError(f"Gemini API failed for all model candidates: {last_error}")
 
         def pass_through() -> Generator[str, None, None]:
             try:
+                emitted = 0
                 for chunk in response:
                     if chunk.text:
+                        emitted += 1
                         yield chunk.text
+                logging.info(f"[GEMINI_DEBUG] Stream complete | model={selected_model} | chunks={emitted}")
             except Exception as e:
-                logging.error(f"[ERROR] Tier {tier} pass-through failed: {e}")
+                logging.error(f"[ERROR] Tier {tier} pass-through failed | model={selected_model}: {e}")
 
         return CascadeResult(
             cascaded=False,
